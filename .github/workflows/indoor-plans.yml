@@ -1,0 +1,41 @@
+name: Build indoor plans
+
+# Pre-builds OpenStreetMap floor plans for every venue in Waypoint's venues table and publishes
+# them with the site, so the app loads a terminal from the CDN instead of the public Overpass servers.
+on:
+  schedule:
+    - cron: "17 7 * * *"   # nightly, 07:17 UTC
+  workflow_dispatch:
+    inputs:
+      refresh:
+        description: "Re-fetch cells even if they are fresh"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: indoor-plans
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch plans
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: python3 scripts/build_indoor_plans.py ${{ inputs.refresh && '--refresh' || '' }}
+      - name: Commit
+        run: |
+          git config user.name "waypoint-bot"
+          git config user.email "noreply@waypoint.app"
+          git add indoor
+          git diff --cached --quiet && echo "no changes" || git commit -m "Refresh indoor plans $(date -u +%F)"
+          git push
