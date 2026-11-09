@@ -22,6 +22,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,6 +34,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: python3 scripts/build_indoor_plans.py ${{ inputs.refresh && '--refresh' || '' }}
       - name: Commit
+        if: always()
         run: |
           git config user.name "waypoint-bot"
           git config user.email "noreply@waypoint.app"

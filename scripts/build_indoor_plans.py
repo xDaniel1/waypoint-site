@@ -16,6 +16,10 @@ OUT = pathlib.Path(__file__).resolve().parent.parent / "indoor"
 ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter",
              "https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
 MAX_AGE_DAYS = 14
+# A hosted job dies at 6 hours and loses everything uncommitted, so stop early and let the next
+# night carry on: cells already written count as fresh and are skipped.
+BUDGET_SECONDS = float(os.environ.get("INDOOR_BUDGET_MIN", "240")) * 60
+STARTED = time.time()
 
 def venues():
     url = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1/venues?select=short_name,latitude,longitude,radius_m,sources&enabled=eq.true"
@@ -41,16 +45,16 @@ def query(row, col):
 
 def fetch(row, col):
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
-    for attempt in range(3):
+    for attempt in range(2):
         for endpoint in ENDPOINTS:
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
-                data = urllib.request.urlopen(req, timeout=90).read()
+                data = urllib.request.urlopen(req, timeout=45).read()
                 json.loads(data)["elements"]
                 return data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
-        time.sleep(10 * (attempt + 1))
+        time.sleep(5 * (attempt + 1))
     return None
 
 def main():
@@ -65,6 +69,9 @@ def main():
     now = time.time()
     written = skipped = failed = 0
     for (row, col), names in sorted(wanted.items()):
+        if time.time() - STARTED > BUDGET_SECONDS:
+            print("time budget used; the next run continues from here")
+            break
         path = OUT / f"indoor_{row}_{col}.json"
         if path.exists() and now - path.stat().st_mtime < MAX_AGE_DAYS * 86400 and "--refresh" not in sys.argv:
             skipped += 1
