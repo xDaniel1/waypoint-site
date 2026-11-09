@@ -1,0 +1,5 @@
+---
+layout: null
+permalink: /version.json
+---
+{"product":"site","version":{{ site.site_version | jsonify }},"kova_version":{{ site.kova_version | jsonify }},"ios_build":{{ site.ios_build | jsonify }},"commit":{{ site.github.build_revision | default: "" | slice: 0, 7 | jsonify }},"built_at":{{ site.time | date_to_xmlschema | jsonify }}}
