@@ -9,3 +9,8 @@ defaults:
 exclude:
   - scripts
   - README.md
+
+# Release versions shown in the footer. Kova uses one semantic version across iOS, Android and web.
+kova_version: "1.0.0"
+ios_build: "4"
+site_version: "1.0.0"

@@ -52,6 +52,7 @@
     footer .wrap { display:flex; flex-wrap:wrap; gap:24px; justify-content:space-between; align-items:center; padding:32px 24px; color:var(--muted); font-size:14px; }
     footer nav { display:flex; flex-wrap:wrap; gap:20px; }
     footer a { color:var(--muted); }
+    footer .versions { margin-top:6px; font-size:12px; opacity:.85; }
     @media (max-width:720px) { .nav-links a.hide-sm { display:none; } .nav-links { gap:14px; } }
   </style>
 </head>
@@ -69,7 +70,8 @@
   {% if page.url == "/" %}{{ content }}{% else %}<main class="page">{{ content }}</main>{% endif %}
   <footer>
     <div class="wrap">
-      <div>© 2026 Daniel Lantigua · Map data © <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a></div>
+      <div>© 2026 Daniel Lantigua · Map data © <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
+        <div class="versions">Kova Maps {{ site.kova_version }} · iPhone {{ site.kova_version }} ({{ site.ios_build }}) · Web {{ site.kova_version }} · Site {{ site.site_version }} · <a href="/changelog">What's new</a></div></div>
       <nav>
         <a href="https://app.kovamaps.com">Web app</a>
         <a href="https://testflight.apple.com/join/cWQN9SQm">iPhone beta</a>
