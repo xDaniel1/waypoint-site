@@ -20,7 +20,11 @@ description: Search, directions, transit and live traffic. On your iPhone and in
   .browser-bar i { width:11px; height:11px; border-radius:50%; background:#ff5f57; } .browser-bar i:nth-child(2){background:#febc2e} .browser-bar i:nth-child(3){background:#28c840}
   .browser-bar span { margin-left:12px; font-size:12px; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:6px; padding:2px 12px; }
   .phone { position:absolute; right:-8px; bottom:-30px; width:220px; border-radius:32px; border:8px solid #0f1720; overflow:hidden; box-shadow:0 24px 60px rgba(15,23,32,.35); background:#0f1720; }
-  .phone img { aspect-ratio:430/860; object-fit:cover; object-position:top; }
+  .phone img { width:100%; height:auto; }
+  .showcase img { width:100%; height:auto; }
+  .split-media img { width:100%; height:auto; }
+  .hero-phone { display:none; max-width:300px; margin:44px auto 0; border-radius:36px; border:8px solid #0f1720; overflow:hidden; box-shadow:0 24px 60px rgba(15,23,32,.3); }
+  .hero-phone img { width:100%; height:auto; display:block; }
   section { padding:96px 0; }
   .section-head { text-align:center; max-width:680px; margin:0 auto 48px; }
   .section-head h2 { font-size:clamp(30px,4vw,44px); line-height:1.1; margin:0 0 12px; }
@@ -54,7 +58,7 @@ description: Search, directions, transit and live traffic. On your iPhone and in
     .split.rev .split-media { order:0; }
     .phone { display:none; }
   }
-  @media (max-width:600px) { .features { grid-template-columns:1fr; } section { padding:64px 0; } .hero { padding-top:48px; } .ctas .btn { width:100%; } }
+  @media (max-width:600px) { .showcase { display:none; } .hero-phone { display:block; } .features { grid-template-columns:1fr; } section { padding:64px 0; } .hero { padding-top:48px; } .ctas .btn { width:100%; } }
   @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
 </style>
 
@@ -76,8 +80,9 @@ description: Search, directions, transit and live traffic. On your iPhone and in
         <div class="browser-bar"><i></i><i></i><i></i><span>app.kovamaps.com</span></div>
         <img src="/assets/shot-directions.jpg" alt="Kova Maps on the web showing driving directions from Madison Square Garden to the Statue of Liberty with traffic" width="1280" height="800">
       </div>
-      <div class="phone"><img src="/assets/shot-phone.jpg" alt="Kova Maps on a phone showing the Empire State Building" loading="lazy"></div>
+      <div class="phone"><img src="/assets/shot-phone.jpg" alt="Kova Maps on a phone showing the Empire State Building" width="390" height="844" loading="lazy"></div>
     </div>
+    <div class="hero-phone"><img src="/assets/shot-phone.jpg" alt="Kova Maps on a phone showing the Empire State Building" width="390" height="844"></div>
   </div>
 </section>
 
@@ -100,7 +105,7 @@ description: Search, directions, transit and live traffic. On your iPhone and in
 
 <section class="alt">
   <div class="wrap split">
-    <div class="split-media"><img src="/assets/shot-place.jpg" alt="Kova Maps place panel for the Empire State Building with photos, rating and actions" loading="lazy"></div>
+    <div class="split-media"><img src="/assets/shot-place.jpg" alt="Kova Maps place panel for the Empire State Building with photos, rating and actions" width="1280" height="800" loading="lazy"></div>
     <div>
       <h2>Every place, in detail</h2>
       <p>Open any spot on the map to see what it is really like before you go.</p>
@@ -116,7 +121,7 @@ description: Search, directions, transit and live traffic. On your iPhone and in
 
 <section>
   <div class="wrap split rev">
-    <div class="split-media"><img src="/assets/shot-directions.jpg" alt="Directions with route options and live traffic" loading="lazy"></div>
+    <div class="split-media"><img src="/assets/shot-directions.jpg" alt="Directions with route options and live traffic" width="1280" height="800" loading="lazy"></div>
     <div>
       <h2>Pick the best way there</h2>
       <p>Compare every mode at a glance, then dig into the route that fits.</p>
