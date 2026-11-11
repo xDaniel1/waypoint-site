@@ -1,0 +1,163 @@
+[
+ {
+  "agency": "bct",
+  "name": "Broward County Transit",
+  "region": "FL",
+  "stops": 5000,
+  "lines": 0
+ },
+ {
+  "agency": "brightline",
+  "name": "Brightline",
+  "region": "FL",
+  "stops": 6,
+  "lines": 2
+ },
+ {
+  "agency": "cat",
+  "name": "Collier Area Transit",
+  "region": "FL",
+  "stops": 556,
+  "lines": 0
+ },
+ {
+  "agency": "ecat",
+  "name": "ECAT",
+  "region": "FL",
+  "stops": 1031,
+  "lines": 0
+ },
+ {
+  "agency": "hart",
+  "name": "HART",
+  "region": "FL",
+  "stops": 2246,
+  "lines": 5
+ },
+ {
+  "agency": "jta",
+  "name": "JTA",
+  "region": "FL",
+  "stops": 2390,
+  "lines": 5
+ },
+ {
+  "agency": "keywest",
+  "name": "Key West Transit",
+  "region": "FL",
+  "stops": 138,
+  "lines": 0
+ },
+ {
+  "agency": "lakexpress",
+  "name": "LakeXpress",
+  "region": "FL",
+  "stops": 507,
+  "lines": 0
+ },
+ {
+  "agency": "leetran",
+  "name": "LeeTran",
+  "region": "FL",
+  "stops": 1550,
+  "lines": 0
+ },
+ {
+  "agency": "lynx",
+  "name": "LYNX",
+  "region": "FL",
+  "stops": 3687,
+  "lines": 0
+ },
+ {
+  "agency": "mcat",
+  "name": "Manatee County Area Transit",
+  "region": "FL",
+  "stops": 928,
+  "lines": 0
+ },
+ {
+  "agency": "mdt",
+  "name": "Miami-Dade Transit",
+  "region": "FL",
+  "stops": 6973,
+  "lines": 10
+ },
+ {
+  "agency": "miamibeach",
+  "name": "Miami Beach Trolley",
+  "region": "FL",
+  "stops": 198,
+  "lines": 2
+ },
+ {
+  "agency": "palmtran",
+  "name": "Palm Tran",
+  "region": "FL",
+  "stops": 2696,
+  "lines": 0
+ },
+ {
+  "agency": "psta",
+  "name": "PSTA",
+  "region": "FL",
+  "stops": 3985,
+  "lines": 0
+ },
+ {
+  "agency": "rts",
+  "name": "Gainesville RTS",
+  "region": "FL",
+  "stops": 1014,
+  "lines": 0
+ },
+ {
+  "agency": "spacecoast",
+  "name": "Space Coast Area Transit",
+  "region": "FL",
+  "stops": 1057,
+  "lines": 0
+ },
+ {
+  "agency": "starmetro",
+  "name": "StarMetro",
+  "region": "FL",
+  "stops": 937,
+  "lines": 0
+ },
+ {
+  "agency": "sunrail",
+  "name": "SunRail",
+  "region": "FL",
+  "stops": 17,
+  "lines": 2
+ },
+ {
+  "agency": "sunshine",
+  "name": "Sunshine Bus",
+  "region": "FL",
+  "stops": 64,
+  "lines": 0
+ },
+ {
+  "agency": "suntran",
+  "name": "SunTran",
+  "region": "FL",
+  "stops": 269,
+  "lines": 0
+ },
+ {
+  "agency": "trirail",
+  "name": "Tri-Rail",
+  "region": "FL",
+  "stops": 19,
+  "lines": 6
+ },
+ {
+  "agency": "votran",
+  "name": "Votran",
+  "region": "FL",
+  "stops": 2073,
+  "lines": 0
+ }
+]
