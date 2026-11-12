@@ -7,6 +7,14 @@ permalink: /changelog
 
 Kova Maps uses one version number across iPhone, Android and the web.
 
+## 1.0.1 — November 2026
+
+**Web app** (app.kovamaps.com)
+- Loads much faster, especially on phones: smaller downloads, the map engine loads after the page appears, and repeat visits start from a local cache
+
+**This site**
+- Screenshots are served as smaller WebP images sized for your screen, and fonts no longer hold up the first paint
+
 ## 1.0.0 — November 2026
 
 **Web app** (app.kovamaps.com)
