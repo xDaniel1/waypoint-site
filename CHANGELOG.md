@@ -7,6 +7,14 @@ permalink: /changelog
 
 Kova Maps uses one version number across iPhone, Android and the web.
 
+## Site 1.1.0 — November 2026
+
+**kovamaps.com**
+- New homepage: leads with indoor maps for 11 airports, live driver reports and one account across devices.
+- An indoor maps section lists each supported airport. Three main features, with the rest as a short list.
+- A privacy promise (no ads, no tracking, no data sales), matching the privacy policy.
+- Kova teal and coral replace the blue gradient, matching the apps.
+
 ## 1.0.1 — November 2026
 
 **Web app** (app.kovamaps.com)
