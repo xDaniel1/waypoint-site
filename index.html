@@ -1,11 +1,11 @@
 ---
 title: Kova Maps
 permalink: /
-description: Search, directions, transit and live traffic. On your iPhone and in your browser, synced.
+description: Indoor maps for 11 major airports, live reports from other drivers, and one account across iPhone and the web.
 ---
 <style>
   .hero { position:relative; overflow:hidden; padding:72px 0 0; }
-  .hero::before { content:''; position:absolute; inset:-30% -10% auto; height:720px; background:radial-gradient(60% 60% at 30% 30%,rgba(43,63,160,.22),transparent 70%),radial-gradient(50% 50% at 75% 20%,rgba(0,153,168,.22),transparent 70%); pointer-events:none; }
+  .hero::before { content:''; position:absolute; inset:-30% -10% auto; height:720px; background:radial-gradient(60% 60% at 30% 30%,rgba(14,128,156,.22),transparent 70%),radial-gradient(45% 45% at 78% 22%,rgba(250,115,77,.16),transparent 70%); pointer-events:none; }
   .hero .wrap { position:relative; text-align:center; }
   .eyebrow { display:inline-flex; align-items:center; gap:8px; padding:6px 14px; border-radius:999px; background:var(--card); border:1px solid var(--line); color:var(--muted); font-size:13px; font-weight:600; box-shadow:var(--shadow); }
   .eyebrow b { background:var(--brand); -webkit-background-clip:text; background-clip:text; color:transparent; }
@@ -52,6 +52,25 @@ description: Search, directions, transit and live traffic. On your iPhone and in
   .cta-band .btn { border-color:rgba(255,255,255,.35); }
   .cta-band .btn.light { background:#fff; color:#0f1720; }
   .cta-band .btn.ghost { background:transparent; color:#fff; }
+  .hero h1 span.warm { background:none; color:var(--warm); }
+  .features { grid-template-columns:repeat(3,1fr); }
+  .feature .ic { border-radius:12px; }
+  .more { display:grid; grid-template-columns:repeat(3,1fr); gap:10px 24px; margin:28px 0 0; padding:0; list-style:none; color:var(--muted); font-size:15px; }
+  .more li::before { content:''; display:inline-block; width:8px; height:8px; margin-right:10px; background:var(--accent); transform:rotate(45deg); border-radius:1px; }
+  .indoor { background:var(--bg-2); }
+  .airports { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0 0; padding:0; list-style:none; }
+  .airports li { padding:8px 12px; border-radius:10px; background:var(--card); border:1px solid var(--line); font:700 14px/1 Manrope,Inter,sans-serif; letter-spacing:.04em; }
+  .airports li small { display:block; margin-top:4px; font:500 11px/1.2 Inter,sans-serif; letter-spacing:0; color:var(--muted); }
+  .floorplan { aspect-ratio:4/3; border-radius:18px; border:1px solid var(--line); background:var(--card); box-shadow:var(--shadow); position:relative; overflow:hidden; }
+  .floorplan svg { width:100%; height:100%; display:block; }
+  .floors { position:absolute; right:14px; top:14px; display:flex; flex-direction:column; gap:4px; }
+  .floors span { width:36px; height:32px; display:grid; place-items:center; border-radius:9px; background:var(--card); border:1px solid var(--line); font-weight:700; font-size:13px; }
+  .floors span.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .promise { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .promise div { padding:22px; border-radius:16px; border:1px solid var(--line); }
+  .promise h3 { margin:0 0 4px; font-size:17px; }
+  .promise p { margin:0; color:var(--muted); font-size:15px; }
+  @media (max-width:900px) { .more { grid-template-columns:1fr 1fr; } .promise { grid-template-columns:1fr; } }
   @media (max-width:900px) {
     .features { grid-template-columns:1fr 1fr; }
     .split, .split.rev { grid-template-columns:1fr; gap:28px; }
@@ -64,9 +83,9 @@ description: Search, directions, transit and live traffic. On your iPhone and in
 
 <section class="hero">
   <div class="wrap">
-    <span class="eyebrow"><b>New</b> Kova Maps is now on the web</span>
-    <h1>Maps that <span>get you there.</span></h1>
-    <p class="lead">Search any place, compare routes with live traffic, take transit, and keep your saved places in sync between your iPhone and your browser.</p>
+    <span class="eyebrow"><b>New</b> Indoor maps for 11 major airports</span>
+    <h1>The map that knows <span>the inside,</span> <span class="warm">too.</span></h1>
+    <p class="lead">Find your gate, your coffee and your car. Kova Maps adds indoor airport maps and live reports from other drivers to fast search and directions, with one account across your iPhone and your browser.</p>
     <div class="ctas">
       <a class="btn primary" href="https://app.kovamaps.com" data-cta="hero">Open the web app
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
@@ -86,6 +105,33 @@ description: Search, directions, transit and live traffic. On your iPhone and in
   </div>
 </section>
 
+<section class="indoor" id="indoor">
+  <div class="wrap split">
+    <div>
+      <h2>Indoor maps, floor by floor</h2>
+      <p>Zoom into a supported airport and Kova switches to its floor plan. Pick a floor, or tap Browse to find gates, security, restrooms, baggage claim, food and shops.</p>
+      <ul class="airports" aria-label="Airports with indoor maps">
+        <li>ATL<small>Atlanta</small></li><li>LAX<small>Los Angeles</small></li><li>ORD<small>Chicago</small></li><li>DFW<small>Dallas</small></li><li>MIA<small>Miami</small></li><li>MCO<small>Orlando</small></li><li>TPA<small>Tampa</small></li><li>JFK<small>New York</small></li><li>LGA<small>New York</small></li><li>EWR<small>Newark</small></li><li>LHR<small>London</small></li>
+      </ul>
+      <p style="font-size:14px;margin-top:16px">Theme parks, malls and stations get a Browse list of their places, too.</p>
+    </div>
+    <div class="floorplan" role="img" aria-label="Illustration of an airport floor plan with a floor picker">
+      <svg viewBox="0 0 400 300" aria-hidden="true">
+        <rect width="400" height="300" fill="var(--bg-2)"/>
+        <path d="M40 150 H360" stroke="var(--line)" stroke-width="44" stroke-linecap="round"/>
+        <g fill="var(--card)" stroke="var(--line)" stroke-width="2">
+          <rect x="60" y="60" width="70" height="56" rx="8"/><rect x="150" y="60" width="70" height="56" rx="8"/><rect x="240" y="60" width="90" height="56" rx="8"/>
+          <rect x="60" y="184" width="100" height="56" rx="8"/><rect x="180" y="184" width="60" height="56" rx="8"/><rect x="260" y="184" width="70" height="56" rx="8"/>
+        </g>
+        <g fill="var(--accent)"><circle cx="95" cy="88" r="7"/><circle cx="295" cy="212" r="7"/><circle cx="210" cy="212" r="7"/></g>
+        <path d="M200 120 L212 140 L200 156 L188 140 Z" fill="var(--warm)" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>
+        <g font-family="Inter,sans-serif" font-size="11" font-weight="600" fill="var(--muted)"><text x="70" y="108">Gate B12</text><text x="160" y="108">Security</text><text x="250" y="108">Baggage claim</text><text x="70" y="232">Food court</text><text x="188" y="232">Restrooms</text><text x="268" y="232">Shops</text></g>
+      </svg>
+      <div class="floors" aria-hidden="true"><span>3</span><span class="on">2</span><span>1</span></div>
+    </div>
+  </div>
+</section>
+
 <section id="features">
   <div class="wrap">
     <div class="section-head">
@@ -93,12 +139,18 @@ description: Search, directions, transit and live traffic. On your iPhone and in
       <p>Built on Mapbox and enriched with place details, transit and live traffic.</p>
     </div>
     <div class="features">
-      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div><h3>Search that knows the place</h3><p>Suggestions as you type, then photos, ratings, hours, phone and reviews for every result.</p></div>
-      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div><h3>Live traffic routes</h3><p>Routes coloured by congestion, alternatives side by side, and the time for driving, transit, walking and cycling.</p></div>
-      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M8 21l2-4M16 21l-2-4M5 11h14"/></svg></div><h3>Transit, line by line</h3><p>Subway, bus and ferry legs in their own colours, with stops, times and the fare.</p></div>
-      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M9 20V10M15 20V4M4 14l5-4 6 6 5-4"/></svg></div><h3>Lanes and speed limits</h3><p>Lane arrows at every turn and the posted limit on each road, so nothing surprises you.</p></div>
-      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></div><h3>Shared traffic reports</h3><p>Accidents, hazards and closures reported by other drivers show up on your map.</p></div>
-      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></div><h3>Saved everywhere</h3><p>Sign in once and your saved places and recents follow you between iPhone and web.</p></div>
+      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div><h3>Live traffic routes</h3><p>Routes coloured by congestion, alternatives side by side, and times for driving, transit, walking and cycling.</p></div>
+      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></div><h3>Reports from other drivers</h3><p>Accidents, hazards, closures and speed traps that other Kova drivers report show up on your map.</p></div>
+      <div class="feature"><div class="ic"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg></div><h3>Saved everywhere</h3><p>Sign in once, and your Home, Work, saved places and recents follow you between iPhone and web.</p></div>
+    </div>
+    <ul class="more">
+      <li>Photos, ratings, hours and reviews</li>
+      <li>Transit legs in their line colours</li>
+      <li>Lane arrows and posted speed limits</li>
+      <li>Leave now, depart at or arrive by</li>
+      <li>Multiple stops in any order</li>
+      <li>CarPlay and Live Activities on iPhone</li>
+    </ul>
     </div>
   </div>
 </section>
@@ -129,8 +181,19 @@ description: Search, directions, transit and live traffic. On your iPhone and in
         <li>Leave now, depart at, or arrive by</li>
         <li>Multiple stops in any order</li>
         <li>Turn-by-turn on iPhone, with CarPlay and Live Activities</li>
-        <li>Indoor maps for NYC airports, malls and stations</li>
+        <li>Indoor maps for 11 major airports, plus malls and stations</li>
       </ul>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="section-head"><h2>Your trips stay yours</h2></div>
+    <div class="promise">
+      <div><h3>No ads</h3><p>No advertising or analytics SDKs, on iPhone or the web.</p></div>
+      <div><h3>No tracking</h3><p>Kova doesn't follow you across other apps or websites.</p></div>
+      <div><h3>No data sales</h3><p>Your information is never sold or rented. <a href="/privacy">Read the privacy policy</a>.</p></div>
     </div>
   </div>
 </section>
