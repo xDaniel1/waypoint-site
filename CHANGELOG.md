@@ -14,6 +14,7 @@ Kova Maps uses one version number across iPhone, Android and the web.
 - An indoor maps section lists each supported airport. Three main features, with the rest as a short list.
 - A privacy promise (no ads, no tracking, no data sales), matching the privacy policy.
 - Kova teal and coral replace the blue gradient, matching the apps.
+- New screenshots of the web app as it is now (1.0.6): Kova's layout, the iPhone's map style, teal routes.
 
 ## 1.0.1 — November 2026
 
