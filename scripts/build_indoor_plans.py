@@ -9,7 +9,7 @@ looks after its bundle. Run nightly by .github/workflows/indoor-plans.yml.
 
 Environment: SUPABASE_URL, SUPABASE_ANON_KEY (the anon key is public by design; RLS only lets it read).
 """
-import json, math, os, pathlib, sys, time, urllib.parse, urllib.request
+import json, math, os, pathlib, signal, sys, time, urllib.parse, urllib.request
 
 CELL, MARGIN = 0.006, 0.002
 OUT = pathlib.Path(__file__).resolve().parent.parent / "indoor"
@@ -64,6 +64,21 @@ def read_capped(response, seconds):
             return b"".join(parts)
         parts.append(chunk)
 
+class hard_limit:
+    """Raises TimeoutError in the main thread after `seconds`, wherever the request is blocked:
+    connecting, waiting for headers or inside a read. The socket timeout only bounds each wait."""
+    def __init__(self, seconds):
+        self.seconds = seconds
+    def __enter__(self):
+        def expire(signum, frame):
+            raise TimeoutError(f"request took over {self.seconds} s")
+        self.old = signal.signal(signal.SIGALRM, expire)
+        signal.setitimer(signal.ITIMER_REAL, self.seconds)
+    def __exit__(self, *exc):
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, self.old)
+        return False
+
 def fetch(row, col):
     """The cell's Overpass answer, or None when every server failed. Raises BudgetSpent if there was
     no time for even one request, so the cell is not counted as tried."""
@@ -79,8 +94,9 @@ def fetch(row, col):
             requested = True
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
-                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-                    data = read_capped(response, REQUEST_TIMEOUT)
+                with hard_limit(REQUEST_TIMEOUT):
+                    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                        data = read_capped(response, REQUEST_TIMEOUT)
                 check_answer(data)
                 return data
             except Exception as error:
@@ -104,8 +120,12 @@ def load_index():
         raw = {}
     def times(name):
         part = raw.get(name)
-        return {k: v for k, v in part.items() if isinstance(v, (int, float))} if isinstance(part, dict) else {}
+        return {k: v for k, v in part.items() if is_time(v)} if isinstance(part, dict) else {}
     return {"fetched": times("fetched"), "tried": times("tried")}
+
+def is_time(v):
+    """A real time stamp: a finite number, not NaN or infinity (which JSON decoding accepts)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 def save_index(index):
     INDEX.parent.mkdir(exist_ok=True)
@@ -153,7 +173,7 @@ def is_fresh(path, fetched, now):
     File times can't be used: Actions checks the files out with new times, so every cell looked
     fresh forever. Cells never fetched into the index, or written by the old query (relations
     without members, so no outlines), are rebuilt."""
-    if not isinstance(fetched, (int, float)) or now - fetched >= MAX_AGE_DAYS * 86400:
+    if not is_time(fetched) or fetched > now or now - fetched >= MAX_AGE_DAYS * 86400:
         return False
     try:
         cell = json.loads(path.read_bytes())
@@ -178,10 +198,19 @@ def check_answer(data):
     return parsed["elements"]
 
 def has_members(element):
-    """Relations must carry their member list (the outline); other elements pass."""
+    """Relations must carry members with geometry (the outline); other elements pass. The query
+    only asks for terminal and station relations, and those are always drawn from their members."""
     if not isinstance(element, dict):
         return False
-    return element.get("type") != "relation" or isinstance(element.get("members"), list)
+    if element.get("type") != "relation":
+        return True
+    members = element.get("members")
+    if not isinstance(members, list) or not members or not all(isinstance(m, dict) for m in members):
+        return False
+    # `out geom` gives way members their points. A relation made only of other relations gets none,
+    # and must not block its cell forever, so only way members are held to it.
+    ways = [m for m in members if m.get("type") == "way"]
+    return not ways or any(isinstance(m.get("geometry"), list) and len(m["geometry"]) >= 2 for m in ways)
 
 def main():
     OUT.mkdir(exist_ok=True)

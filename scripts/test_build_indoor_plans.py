@@ -18,7 +18,8 @@ class Freshness(unittest.TestCase):
         return path
 
     def test_recent_cell_from_current_query_is_fresh(self):
-        path = self.cell({"elements": [{"type": "relation", "members": []}, {"type": "way"}]})
+        rel = {"type": "relation", "members": [{"role": "outer", "geometry": [{"lat": 0, "lon": 0}, {"lat": 0, "lon": 1}]}]}
+        path = self.cell({"elements": [rel, {"type": "way"}]})
         self.assertTrue(b.is_fresh(path, self.now - DAY, self.now))
 
     def test_empty_cell_is_fresh(self):
@@ -28,6 +29,11 @@ class Freshness(unittest.TestCase):
         path = self.cell({"elements": []})
         self.assertFalse(b.is_fresh(path, self.now - b.MAX_AGE_DAYS * DAY, self.now))
         self.assertFalse(b.is_fresh(path, None, self.now))
+
+    def test_impossible_fetch_times_are_stale(self):
+        path = self.cell({"elements": []})
+        for t in (float("nan"), float("inf"), self.now + DAY, True):
+            self.assertFalse(b.is_fresh(path, t, self.now), t)
 
     def test_cell_from_old_query_is_stale(self):
         # `out tags geom` left relations without members, so no outlines.
@@ -59,7 +65,14 @@ class Answers(unittest.TestCase):
         for body in (b'{"elements":[{"type":"relation","id":1}]}', b'{"elements":[{"type":"relation","members":null}]}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
-        self.assertEqual(len(b.check_answer(b'{"elements":[{"type":"relation","members":[]},{"type":"way"}]}')), 2)
+        for body in (b'{"elements":[{"type":"relation","members":[]}]}',
+                     b'{"elements":[{"type":"relation","members":[{"type":"way","role":"outer"}]}]}'):
+            with self.assertRaises(ValueError):
+                b.check_answer(body)  # no outline to draw
+        nested = b'{"elements":[{"type":"relation","members":[{"type":"relation","ref":5,"role":""}]}]}'
+        self.assertEqual(len(b.check_answer(nested)), 1)  # nothing for `out geom` to fill in
+        ok = b'{"elements":[{"type":"relation","members":[{"type":"way","role":"","geometry":[{"lat":0,"lon":0},{"lat":0,"lon":1}]}]},{"type":"way"}]}'
+        self.assertEqual(len(b.check_answer(ok)), 2)
 
     def test_slim_drops_node_ids_and_keeps_geometry(self):
         way = {"type": "way", "nodes": [1, 2], "geometry": [{"lat": 0, "lon": 0}]}
@@ -134,6 +147,18 @@ class Files(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             b.read_capped(Trickle(), 0.1)
 
+    def test_hard_limit_stops_a_blocked_read(self):
+        import socket
+        a, c = socket.socketpair()
+        try:
+            started = time.monotonic()
+            with self.assertRaises(TimeoutError):
+                with b.hard_limit(0.2):
+                    a.recv(1)  # nothing is ever sent
+            self.assertLess(time.monotonic() - started, 1)
+        finally:
+            a.close(); c.close()
+
     def test_read_returns_whole_body(self):
         class Body:
             def __init__(self):
@@ -165,7 +190,7 @@ class Files(unittest.TestCase):
             self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}})
             b.save_index({"fetched": {"1_2": 5}, "tried": {"1_2": 6}})
             self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}})
-            b.INDEX.write_text('{"fetched": {"a": "x", "b": 1}, "tried": []}')
+            b.INDEX.write_text('{"fetched": {"a": "x", "b": 1, "c": NaN, "d": Infinity}, "tried": []}')
             self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}})
         finally:
             b.INDEX = old
