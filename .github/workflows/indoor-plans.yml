@@ -53,9 +53,12 @@ jobs:
           git commit -m "Refresh indoor plans $(date -u +%F)"
           # main may have moved during the hours of fetching; only this job writes indoor/ and the
           # index, so replaying the commit on top is safe.
-          git pull --rebase origin main
-          git push
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push; then echo "pushed=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+            echo "push rejected (main moved); retrying"; sleep $((attempt * 10))
+          done
+          echo "::error::could not push the refreshed cells"; exit 1
       - name: Publish
         # Every run checks that Pages serves what is on main, including cells pushed by an earlier
         # run whose build failed. Pages has built every bot push so far, but a GITHUB_TOKEN push is
@@ -76,9 +79,15 @@ jobs:
           asked=no
           seen=no
           for i in $(seq 1 40); do
+            # Any recent successful build that contains this commit means Pages serves it, even if a
+            # newer build (someone else's merge) failed afterwards.
+            if built=$(gh api "repos/$REPO/pages/builds?per_page=10" --jq '.[] | select(.status == "built") | .commit' 2>/dev/null); then
+              for c in $built; do
+                if contains "$c"; then echo "Pages built $c, which contains $sha"; exit 0; fi
+              done
+            fi
             if out=$(gh api "repos/$REPO/pages/builds/latest" --jq '"\(.commit) \(.status)"' 2>/dev/null); then
               read -r commit status <<< "$out"
-              if [ "$status" = built ] && contains "$commit"; then echo "Pages serves $commit, which contains $sha"; exit 0; fi
               # An errored build (tonight's or an earlier night's) gets one rebuild; red only if
               # the rebuild errors too.
               if [ "$status" = errored ] && contains "$commit" && [ "$asked" = yes ] && [ "$seen" = yes ]; then echo "::error::Pages rebuild of $commit errored"; exit 1; fi

@@ -246,7 +246,8 @@ def well_formed(element):
     """An element the apps' strict decoders accept: a node, way or relation with a numeric id,
     string tags, and members whose role is a string."""
     if not (isinstance(element, dict) and element.get("type") in ("node", "way", "relation")
-            and isinstance(element.get("id"), int) and not isinstance(element.get("id"), bool)):
+            and isinstance(element.get("id"), int) and not isinstance(element.get("id"), bool)
+            and -2**63 <= element["id"] < 2**63):  # iOS decodes ids as Int64
         return False
     tags = element.get("tags")
     if tags is not None and not (isinstance(tags, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items())):
