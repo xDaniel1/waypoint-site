@@ -81,6 +81,7 @@ class Answers(unittest.TestCase):
                      b'{"elements":[{"type":"way","id":99999999999999999999}]}',
                      b'{"elements":[{"type":"relation","id":1,"members":{"a":1}}]}',
                      b'{"elements":[{"type":"node","id":1,"lat":NaN,"lon":0}]}',
+                     b'{"elements":[{"type":"relation","id":1,"members":[{"type":"node","lat":1e999,"lon":0}]}]}',
                      b'{"elements":[{"type":"relation","id":1,"members":[{"type":"way","role":3}]}]}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
@@ -218,6 +219,7 @@ class Files(unittest.TestCase):
 
     def test_older_snapshot_from_a_lagging_mirror_is_refused(self):
         answers = iter([b'{"osm3s":{"timestamp_osm_base":"2026-11-20T00:00:00Z"},"elements":[]}',
+                        b'{"elements":[]}',  # no snapshot at all: can't tell, so not taken
                         b'{"osm3s":{"timestamp_osm_base":"2026-11-22T00:00:00Z"},"elements":[]}'])
         class Resp:
             def __init__(self, body): self.parts = [body, b""]

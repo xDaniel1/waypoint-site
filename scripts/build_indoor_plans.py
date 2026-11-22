@@ -98,7 +98,7 @@ def fetch(row, col, not_before=None):
                     check_answer(data)
                     base = snapshot_of(data)
                     # A mirror lagging behind the snapshot we already published would roll the cell back.
-                    if not_before and base and base < not_before:
+                    if not_before and (not base or base < not_before):
                         raise ValueError(f"older snapshot ({base} < {not_before})")
                 return data
             except Exception as error:
@@ -240,7 +240,7 @@ def encode(elements, osm_base=None):
     cell = {"elements": elements}
     if osm_base:
         cell["osm_base"] = osm_base
-    return json.dumps(cell, separators=(",", ":")).encode()
+    return json.dumps(cell, separators=(",", ":"), allow_nan=False).encode()
 
 def is_fresh(path, fetched, now):
     """A cell is fresh if the index says it was fetched under MAX_AGE_DAYS ago and its file is a
@@ -267,6 +267,7 @@ def check_answer(data):
     def no_constants(name):  # NaN and Infinity aren't JSON; the apps' decoders reject them
         raise ValueError(f"{name} in answer")
     parsed = json.loads(data, parse_constant=no_constants)
+    json.dumps(parsed, allow_nan=False)  # a number too big for a float (1e999) reads as inf: reject it
     if not isinstance(parsed, dict) or not isinstance(parsed.get("elements"), list):
         raise ValueError("no elements list")
     if "remark" in parsed:
