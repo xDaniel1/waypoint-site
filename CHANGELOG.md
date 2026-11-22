@@ -7,6 +7,11 @@ permalink: /changelog
 
 Kova Maps uses one version number across iPhone, Android and the web.
 
+## Site 1.1.1 — November 2026
+
+**Indoor plans** (kovamaps.com/indoor)
+- Terminals and stations mapped as multipolygons (JFK Terminals 5, 7 and 8, Penn Station, Grand Central and others) now come with their outlines. The nightly build asked OpenStreetMap for their tags only, so the apps had no shape to draw. Same fix as iPhone build 76.
+
 ## Site 1.1.0 — November 2026
 
 **kovamaps.com**

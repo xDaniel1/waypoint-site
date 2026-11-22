@@ -41,7 +41,7 @@ def query(row, col):
             f"way[highway=steps][level]({box});way[aeroway=gate]({box});"
             f"node[shop][level]({box});node[amenity][level]({box});node[aeroway=gate]({box});"
             f"way[aeroway=terminal]({box});way[building=train_station]({box});way[building=transportation]({box});"
-            f"rel[aeroway=terminal]({box});rel[building=train_station]({box});rel[building=transportation]({box}););out tags geom;")
+            f"rel[aeroway=terminal]({box});rel[building=train_station]({box});rel[building=transportation]({box}););out body geom;")
 
 def fetch(row, col):
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
