@@ -80,6 +80,7 @@ class Answers(unittest.TestCase):
                      b'{"elements":[{"type":"way","id":1,"tags":{"level":1}}]}',
                      b'{"elements":[{"type":"way","id":99999999999999999999}]}',
                      b'{"elements":[{"type":"relation","id":1,"members":{"a":1}}]}',
+                     b'{"elements":[{"type":"node","id":1,"lat":NaN,"lon":0}]}',
                      b'{"elements":[{"type":"relation","id":1,"members":[{"type":"way","role":3}]}]}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
@@ -119,8 +120,10 @@ class Scheduling(unittest.TestCase):
     def test_stuck_cells_are_listed(self):
         week = 7 * DAY
         index = {"fetched": {"a": 0, "b": 10 * DAY}, "tried": {"a": 10 * DAY, "b": 10 * DAY, "c": 10 * DAY}}
-        self.assertEqual(b.stuck_cells(index, week=week), ["a", "c"])
-        self.assertEqual(b.stuck_cells({"fetched": {}, "tried": {"1_2": 10 * DAY, "9_9": 10 * DAY}}, [(1, 2)], week), ["1_2"])
+        self.assertEqual(b.stuck_cells(index, week=week), ["a"])  # "c" has no first try recorded
+        self.assertEqual(b.stuck_cells({"fetched": {}, "tried": {"1_2": 10 * DAY, "9_9": 10 * DAY}, "first_tried": {"1_2": 1 * DAY, "9_9": DAY}}, [(1, 2)], week), ["1_2"])
+        # a new venue whose first try just failed is not "a week" stuck
+        self.assertEqual(b.stuck_cells({"fetched": {}, "tried": {"5_5": 10 * DAY}, "first_tried": {"5_5": 10 * DAY}}, None, week), [])
 
     def test_many_failures_turn_the_run_red(self):
         self.assertEqual(b.outcome(written=500, failed=3), 0)
@@ -200,7 +203,7 @@ class Files(unittest.TestCase):
 
     def test_budget_stop_is_not_a_try(self):
         cells = {(1, 2): ["X"]}
-        index = {"fetched": {}, "tried": {}, "osm": {}}
+        index = {"fetched": {}, "tried": {}, "first_tried": {}, "osm": {}}
         old = b.BUDGET_SECONDS
         try:
             b.BUDGET_SECONDS = time.time() - b.STARTED + b.REQUEST_TIMEOUT + 0.5  # passes run's check, not fetch's
@@ -238,11 +241,11 @@ class Files(unittest.TestCase):
         old = b.INDEX
         try:
             b.INDEX = d / "_data" / "indoor_fetched.json"
-            self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}, "osm": {}})
+            self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}, "first_tried": {}, "osm": {}})
             b.save_index({"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
-            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
+            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "first_tried": {}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
             b.INDEX.write_text('{"fetched": {"a": "x", "b": 1, "c": NaN, "d": Infinity}, "tried": []}')
-            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "osm": {}})
+            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "first_tried": {}, "osm": {}})
         finally:
             b.INDEX = old
 

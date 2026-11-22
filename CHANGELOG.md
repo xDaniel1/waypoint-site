@@ -20,7 +20,7 @@ Kova Maps uses one version number across iPhone, Android and the web.
 - Every nightly run checks that the site serves what is on main, including cells from an earlier run whose site build failed (that build is retried once), and goes red if it can't get them published within 10 minutes.
 - Each cell records the OpenStreetMap snapshot it was built from (`osm_base`), and an answer from a mirror lagging behind that snapshot is refused, so a cell never rolls back. The apps can use it to prefer the newer of two cells.
 - Runs always start from the latest main, so a re-run or a queued run builds on what was already pushed.
-- Cells that keep failing for a week are listed as a warning on the run.
+- Cells that keep failing for a week are listed as a warning on the run. The index of fetch and try times changes every night, so each run commits it and the site rebuilds nightly even when no cell changed.
 - The publisher's freshness, scheduling and answer checks have tests, run before every nightly build.
 
 ## Site 1.1.0 — November 2026

@@ -126,7 +126,7 @@ def load_index():
         return {k: v for k, v in part.items() if is_time(v)} if isinstance(part, dict) else {}
     osm = raw.get("osm")
     osm = {k: v for k, v in osm.items() if is_snapshot(v)} if isinstance(osm, dict) else {}
-    return {"fetched": times("fetched"), "tried": times("tried"), "osm": osm}
+    return {"fetched": times("fetched"), "tried": times("tried"), "first_tried": times("first_tried"), "osm": osm}
 
 def is_snapshot(v):
     """An Overpass timestamp_osm_base such as 2026-11-22T07:20:03Z (compares as text)."""
@@ -146,7 +146,7 @@ def is_time(v):
 
 def save_index(index):
     INDEX.parent.mkdir(exist_ok=True)
-    body = {name: dict(sorted(index.get(name, {}).items())) for name in ("fetched", "tried", "osm")}
+    body = {name: dict(sorted(index.get(name, {}).items())) for name in ("fetched", "tried", "first_tried", "osm")}
     write_atomic(INDEX, (json.dumps(body, indent=0) + "\n").encode())
 
 def same_elements(path, elements):
@@ -177,8 +177,10 @@ def order(cells, index):
 def stuck_cells(index, wanted=None, week=7 * 86400):
     """Cells still wanted that were tried more than a week after their last successful fetch."""
     keep = None if wanted is None else {f"{r}_{c}" for r, c in wanted}
+    # A cell never fetched counts from its first try, not from 1970.
+    first = index.get("first_tried", {})
     return sorted(k for k, t in index["tried"].items()
-                  if (keep is None or k in keep) and t - index["fetched"].get(k, 0) > week)
+                  if (keep is None or k in keep) and t - index["fetched"].get(k, first.get(k, t)) > week)
 
 def outcome(written, failed):
     """Exit status: red when failures match or outnumber successes, or more than a few cells failed,
@@ -262,7 +264,9 @@ def check_answer(data):
 
     Overpass reports a timeout or out-of-memory as a 200 with partial results and a "remark".
     Writing that would replace a good cell with a broken one."""
-    parsed = json.loads(data)
+    def no_constants(name):  # NaN and Infinity aren't JSON; the apps' decoders reject them
+        raise ValueError(f"{name} in answer")
+    parsed = json.loads(data, parse_constant=no_constants)
     if not isinstance(parsed, dict) or not isinstance(parsed.get("elements"), list):
         raise ValueError("no elements list")
     if "remark" in parsed:
@@ -337,6 +341,7 @@ def run(wanted, index, now):
                 return 1
             break
         index["tried"][key] = int(time.time())
+        index.setdefault("first_tried", {}).setdefault(key, index["tried"][key])
         if data is None:
             failed += 1
             print(f"failed {row},{col} ({', '.join(names)})")
