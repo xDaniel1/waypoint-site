@@ -41,7 +41,8 @@ jobs:
         run: |
           git config user.name "waypoint-bot"
           git config user.email "noreply@waypoint.app"
-          git add indoor _data
+          git add indoor
+          if [ -d _data ]; then git add _data; fi
           # A temporary file left by a failed write is never published.
           git reset -q -- 'indoor/*.tmp' '_data/*.tmp' || true
           git diff --cached --quiet && echo "no changes" || git commit -m "Refresh indoor plans $(date -u +%F)"

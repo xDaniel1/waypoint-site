@@ -228,6 +228,8 @@ def run(wanted, index, now):
             write_atomic(path, body)
         index["fetched"][key] = int(time.time())
         written += 1
+        if written % 25 == 0:
+            save_index(index)  # a hard-killed job keeps most of its progress
         print(f"{row},{col}: {len(elements)} elements ({', '.join(names)})")
         time.sleep(1.5)
     print(f"written {written}, fresh {skipped}, failed {failed}")
