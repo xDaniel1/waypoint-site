@@ -27,6 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Always today's main, never the commit the run was started from: a re-run, or a run
+          # queued behind another, must build on the cells and index already pushed.
+          ref: main
           fetch-depth: 0  # the commit step rebases onto main, which may have moved
       - uses: actions/setup-python@v5
         with:

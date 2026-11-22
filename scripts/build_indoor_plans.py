@@ -80,7 +80,7 @@ class hard_limit:
         signal.signal(signal.SIGALRM, self.old)
         return False
 
-def fetch(row, col):
+def fetch(row, col, not_before=None):
     """The cell's Overpass answer, or None when every server failed. Raises BudgetSpent if there was
     no time for the next request, so the cell is not counted as tried."""
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
@@ -96,6 +96,10 @@ def fetch(row, col):
                     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
                         data = read_capped(response, REQUEST_TIMEOUT)
                     check_answer(data)
+                    base = snapshot_of(data)
+                    # A mirror lagging behind the snapshot we already published would roll the cell back.
+                    if not_before and base and base < not_before:
+                        raise ValueError(f"older snapshot ({base} < {not_before})")
                 return data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
@@ -109,7 +113,8 @@ def fetch(row, col):
 INDEX = OUT.parent / "_data" / "indoor_fetched.json"
 
 def load_index():
-    """{"fetched": {cell: time}, "tried": {cell: time}}; anything unreadable counts as empty."""
+    """{"fetched": {cell: time}, "tried": {cell: time}, "osm": {cell: snapshot}}; anything
+    unreadable counts as empty. "osm" is the OpenStreetMap snapshot time of the cell's data."""
     try:
         raw = json.loads(INDEX.read_bytes())
     except (OSError, ValueError):
@@ -119,7 +124,21 @@ def load_index():
     def times(name):
         part = raw.get(name)
         return {k: v for k, v in part.items() if is_time(v)} if isinstance(part, dict) else {}
-    return {"fetched": times("fetched"), "tried": times("tried")}
+    osm = raw.get("osm")
+    osm = {k: v for k, v in osm.items() if is_snapshot(v)} if isinstance(osm, dict) else {}
+    return {"fetched": times("fetched"), "tried": times("tried"), "osm": osm}
+
+def is_snapshot(v):
+    """An Overpass timestamp_osm_base such as 2026-11-22T07:20:03Z (compares as text)."""
+    return isinstance(v, str) and len(v) == 20 and v[4] == "-" and v[10] == "T" and v.endswith("Z")
+
+def snapshot_of(data):
+    """The OpenStreetMap snapshot an Overpass answer was made from, or None."""
+    try:
+        base = json.loads(data).get("osm3s", {}).get("timestamp_osm_base")
+    except (ValueError, AttributeError):
+        return None
+    return base if is_snapshot(base) else None
 
 def is_time(v):
     """A real time stamp: a finite number, not NaN or infinity (which JSON decoding accepts)."""
@@ -127,8 +146,14 @@ def is_time(v):
 
 def save_index(index):
     INDEX.parent.mkdir(exist_ok=True)
-    body = {name: dict(sorted(index[name].items())) for name in ("fetched", "tried")}
+    body = {name: dict(sorted(index.get(name, {}).items())) for name in ("fetched", "tried", "osm")}
     write_atomic(INDEX, (json.dumps(body, indent=0) + "\n").encode())
+
+def same_elements(path, elements):
+    try:
+        return json.loads(path.read_bytes()).get("elements") == elements
+    except (OSError, ValueError, AttributeError):
+        return False
 
 def write_atomic(path, body):
     """Write to a sibling and rename, so a failed write never leaves half a file to be committed."""
@@ -208,8 +233,12 @@ def slim(elements):
         out.append(e)
     return out
 
-def encode(elements):
-    return json.dumps({"elements": elements}, separators=(",", ":")).encode()
+def encode(elements, osm_base=None):
+    """The cell file. `osm_base` lets the web prefer the newest of two cells holding one station."""
+    cell = {"elements": elements}
+    if osm_base:
+        cell["osm_base"] = osm_base
+    return json.dumps(cell, separators=(",", ":")).encode()
 
 def is_fresh(path, fetched, now):
     """A cell is fresh if the index says it was fetched under MAX_AGE_DAYS ago and its file is a
@@ -300,7 +329,7 @@ def run(wanted, index, now):
             skipped += 1
             continue
         try:
-            data = fetch(row, col)
+            data = fetch(row, col, index["osm"].get(key))
         except BudgetSpent:
             print("time budget used; the next run continues from here")
             if not written and not failed:
@@ -313,10 +342,13 @@ def run(wanted, index, now):
             print(f"failed {row},{col} ({', '.join(names)})")
             continue
         elements = slim(check_answer(data))
+        base = snapshot_of(data)
         # Empty cells are written too, so the app's lookup is a fast 200 instead of a slow Overpass call.
-        body = encode(elements)
-        if not path.exists() or path.read_bytes() != body:
-            write_atomic(path, body)
+        # A cell is rewritten only when its map data changed (keeping its old snapshot time otherwise).
+        if not same_elements(path, elements):
+            write_atomic(path, encode(elements, base))
+            if base:
+                index["osm"][key] = base
         index["fetched"][key] = int(time.time())
         written += 1
         if written % 25 == 0:

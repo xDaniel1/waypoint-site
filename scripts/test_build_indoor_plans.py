@@ -200,7 +200,7 @@ class Files(unittest.TestCase):
 
     def test_budget_stop_is_not_a_try(self):
         cells = {(1, 2): ["X"]}
-        index = {"fetched": {}, "tried": {}}
+        index = {"fetched": {}, "tried": {}, "osm": {}}
         old = b.BUDGET_SECONDS
         try:
             b.BUDGET_SECONDS = time.time() - b.STARTED + b.REQUEST_TIMEOUT + 0.5  # passes run's check, not fetch's
@@ -213,16 +213,36 @@ class Files(unittest.TestCase):
             b.time_left = real
         self.assertEqual(index["tried"], {})
 
+    def test_older_snapshot_from_a_lagging_mirror_is_refused(self):
+        answers = iter([b'{"osm3s":{"timestamp_osm_base":"2026-11-20T00:00:00Z"},"elements":[]}',
+                        b'{"osm3s":{"timestamp_osm_base":"2026-11-22T00:00:00Z"},"elements":[]}'])
+        class Resp:
+            def __init__(self, body): self.parts = [body, b""]
+            def read(self, n): return self.parts.pop(0)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        real = b.urllib.request.urlopen
+        b.urllib.request.urlopen = lambda *a, **k: Resp(next(answers))
+        try:
+            data = b.fetch(1, 2, not_before="2026-11-21T00:00:00Z")
+        finally:
+            b.urllib.request.urlopen = real
+        self.assertEqual(b.snapshot_of(data), "2026-11-22T00:00:00Z")  # the lagging one was skipped
+
+    def test_cell_carries_its_snapshot(self):
+        self.assertEqual(json.loads(b.encode([], "2026-11-22T00:00:00Z")), {"elements": [], "osm_base": "2026-11-22T00:00:00Z"})
+        self.assertIsNone(b.snapshot_of(b'{"elements":[]}'))
+
     def test_index_round_trips_and_ignores_junk(self):
         d = pathlib.Path(tempfile.mkdtemp())
         old = b.INDEX
         try:
             b.INDEX = d / "_data" / "indoor_fetched.json"
-            self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}})
-            b.save_index({"fetched": {"1_2": 5}, "tried": {"1_2": 6}})
-            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}})
+            self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}, "osm": {}})
+            b.save_index({"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
+            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
             b.INDEX.write_text('{"fetched": {"a": "x", "b": 1, "c": NaN, "d": Infinity}, "tried": []}')
-            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}})
+            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "osm": {}})
         finally:
             b.INDEX = old
 
