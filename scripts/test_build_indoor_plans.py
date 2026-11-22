@@ -33,6 +33,8 @@ class Freshness(unittest.TestCase):
         # `out tags geom` left relations without members, so no outlines.
         path = self.cell({"elements": [{"type": "relation", "tags": {"aeroway": "terminal"}}]})
         self.assertFalse(b.is_fresh(path, self.now - DAY, self.now))
+        path = self.cell({"elements": [{"type": "relation", "members": None}]})
+        self.assertFalse(b.is_fresh(path, self.now - DAY, self.now))
 
     def test_missing_or_broken_file_is_stale(self):
         self.assertFalse(b.is_fresh(self.dir / "nope.json", self.now, self.now))
@@ -52,6 +54,12 @@ class Answers(unittest.TestCase):
         for body in (b'{}', b'[]', b'{"elements":null}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
+
+    def test_relation_without_members_is_rejected(self):
+        for body in (b'{"elements":[{"type":"relation","id":1}]}', b'{"elements":[{"type":"relation","members":null}]}'):
+            with self.assertRaises(ValueError):
+                b.check_answer(body)
+        self.assertEqual(len(b.check_answer(b'{"elements":[{"type":"relation","members":[]},{"type":"way"}]}')), 2)
 
     def test_slim_drops_node_ids_and_keeps_geometry(self):
         way = {"type": "way", "nodes": [1, 2], "geometry": [{"lat": 0, "lon": 0}]}
@@ -111,11 +119,43 @@ class Files(unittest.TestCase):
         b.urllib.request.urlopen = lambda *a, **k: calls.append(1)
         try:
             b.BUDGET_SECONDS = time.time() - b.STARTED + 10  # 10 s left, less than one request
-            self.assertIsNone(b.fetch(1, 2))
+            with self.assertRaises(b.BudgetSpent):
+                b.fetch(1, 2)
         finally:
             b.BUDGET_SECONDS = old
             b.urllib.request.urlopen = real
         self.assertEqual(calls, [])
+
+    def test_read_is_capped_in_total_not_per_chunk(self):
+        class Trickle:
+            def read(self, n):
+                time.sleep(0.02)
+                return b"x"
+        with self.assertRaises(TimeoutError):
+            b.read_capped(Trickle(), 0.1)
+
+    def test_read_returns_whole_body(self):
+        class Body:
+            def __init__(self):
+                self.parts = [b"ab", b"cd", b""]
+            def read(self, n):
+                return self.parts.pop(0)
+        self.assertEqual(b.read_capped(Body(), 5), b"abcd")
+
+    def test_budget_stop_is_not_a_try(self):
+        cells = {(1, 2): ["X"]}
+        index = {"fetched": {}, "tried": {}}
+        old = b.BUDGET_SECONDS
+        try:
+            b.BUDGET_SECONDS = time.time() - b.STARTED + b.REQUEST_TIMEOUT + 0.5  # passes run's check, not fetch's
+            real = b.time_left
+            calls = iter([b.REQUEST_TIMEOUT + 1, 1])
+            b.time_left = lambda: next(calls, 0)
+            self.assertEqual(b.run(cells, index, time.time()), 0)
+        finally:
+            b.BUDGET_SECONDS = old
+            b.time_left = real
+        self.assertEqual(index["tried"], {})
 
     def test_index_round_trips_and_ignores_junk(self):
         d = pathlib.Path(tempfile.mkdtemp())

@@ -48,16 +48,39 @@ REQUEST_TIMEOUT = 75
 def time_left():
     return BUDGET_SECONDS - (time.time() - STARTED)
 
+class BudgetSpent(Exception):
+    """Raised before the first request of a cell when the run has no time left for one."""
+
+def read_capped(response, seconds):
+    """The whole body, or TimeoutError once `seconds` have passed in total. urlopen's timeout is
+    per blocking read, so a server that keeps trickling bytes would otherwise never time out."""
+    deadline = time.monotonic() + seconds
+    parts = []
+    while True:
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"answer took over {seconds} s")
+        chunk = response.read(64 * 1024)
+        if not chunk:
+            return b"".join(parts)
+        parts.append(chunk)
+
 def fetch(row, col):
+    """The cell's Overpass answer, or None when every server failed. Raises BudgetSpent if there was
+    no time for even one request, so the cell is not counted as tried."""
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
+    requested = False
     for attempt in range(2):
         for endpoint in ENDPOINTS:
             # No new request that could run past the budget; the cell is retried next run.
             if time_left() < REQUEST_TIMEOUT:
+                if not requested:
+                    raise BudgetSpent()
                 return None
+            requested = True
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
-                data = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT).read()
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                    data = read_capped(response, REQUEST_TIMEOUT)
                 check_answer(data)
                 return data
             except Exception as error:
@@ -138,7 +161,7 @@ def is_fresh(path, fetched, now):
         return False
     if not isinstance(cell, dict) or not isinstance(cell.get("elements"), list):
         return False
-    return all("members" in e for e in cell["elements"] if isinstance(e, dict) and e.get("type") == "relation")
+    return all(has_members(e) for e in cell["elements"])
 
 def check_answer(data):
     """The elements of an Overpass answer, or ValueError when it is not a whole one.
@@ -150,7 +173,15 @@ def check_answer(data):
         raise ValueError("no elements list")
     if "remark" in parsed:
         raise ValueError(f"partial answer: {str(parsed['remark'])[:120]}")
+    if not all(has_members(e) for e in parsed["elements"]):
+        raise ValueError("a relation came back without its members")
     return parsed["elements"]
+
+def has_members(element):
+    """Relations must carry their member list (the outline); other elements pass."""
+    if not isinstance(element, dict):
+        return False
+    return element.get("type") != "relation" or isinstance(element.get("members"), list)
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -180,8 +211,12 @@ def run(wanted, index, now):
         if "--refresh" not in sys.argv and is_fresh(path, index["fetched"].get(key), now):
             skipped += 1
             continue
+        try:
+            data = fetch(row, col)
+        except BudgetSpent:
+            print("time budget used; the next run continues from here")
+            break
         index["tried"][key] = int(time.time())
-        data = fetch(row, col)
         if data is None:
             failed += 1
             print(f"failed {row},{col} ({', '.join(names)})")
