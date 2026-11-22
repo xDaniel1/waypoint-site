@@ -37,6 +37,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: python3 scripts/build_indoor_plans.py ${{ inputs.refresh && '--refresh' || '' }}
       - name: Commit
+        id: commit
         # Pages serves main; a run from another branch must not push its cells anywhere.
         if: always() && github.ref == 'refs/heads/main'
         run: |
@@ -46,15 +47,17 @@ jobs:
           if [ -d _data ]; then git add _data; fi
           # A temporary file left by a failed write is never published.
           git reset -q -- 'indoor/*.tmp' '_data/*.tmp' || true
-          git diff --cached --quiet && echo "no changes" || git commit -m "Refresh indoor plans $(date -u +%F)"
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "Refresh indoor plans $(date -u +%F)"
           # main may have moved during the hours of fetching; only this job writes indoor/ and the
           # index, so replaying the commit on top is safe.
           git pull --rebase origin main
           git push
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: Publish
         # Pages has built every bot refresh so far, but a GITHUB_TOKEN push is not documented to
         # trigger it, so ask for the build and wait for it. The job goes red if it does not publish.
-        if: always() && github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main' && steps.commit.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

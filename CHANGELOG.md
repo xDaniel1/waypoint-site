@@ -16,6 +16,7 @@ Kova Maps uses one version number across iPhone, Android and the web.
 - Cells leave out the node id lists OpenStreetMap now sends with every way; no app reads them, and they would have made cells about 20% bigger.
 - Overpass gets 60 s per cell instead of 25 s, since answers with outlines are heavier.
 - Cells are worked through least recently tried first, so a run cut off by its time limit (or a manual refresh) carries on where the last one stopped, and a cell that keeps failing no longer holds up the rest. Cells are written to a temporary file and renamed, so a failed write never publishes half a file or a leftover temporary file. No request starts that could run past the time limit, and each request gets 75 s in total, connecting included, even from a server that keeps sending slowly. The run shows red when failures match or outnumber successes, or more than a few cells fail. Only runs on main commit cells, replayed on top of main if it moved during the run, and the run then asks Pages to publish them and waits for the build, going red if it fails.
+- Cells that keep failing for a week are listed as a warning on the run.
 - The publisher's freshness, scheduling and answer checks have tests, run before every nightly build.
 
 ## Site 1.1.0 — November 2026

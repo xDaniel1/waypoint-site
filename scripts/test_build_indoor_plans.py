@@ -94,6 +94,11 @@ class Scheduling(unittest.TestCase):
             index["tried"][f"{cell[0]}_{cell[1]}"] = 1000
         self.assertEqual(b.order(cells, index)[:3], [(0, 3), (0, 4), (0, 5)])
 
+    def test_stuck_cells_are_listed(self):
+        week = 7 * DAY
+        index = {"fetched": {"a": 0, "b": 10 * DAY}, "tried": {"a": 10 * DAY, "b": 10 * DAY, "c": 10 * DAY}}
+        self.assertEqual(b.stuck_cells(index, week), ["a", "c"])
+
     def test_many_failures_turn_the_run_red(self):
         self.assertEqual(b.outcome(written=500, failed=3), 0)
         self.assertEqual(b.outcome(written=500, failed=40), 0)

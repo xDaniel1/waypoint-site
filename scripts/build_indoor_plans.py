@@ -152,6 +152,10 @@ def order(cells, index):
         return max(index["fetched"].get(key, 0), index["tried"].get(key, 0))
     return sorted(cells, key=lambda cell: (last(cell), cell))
 
+def stuck_cells(index, week=7 * 86400):
+    """Cells tried more than a week after their last successful fetch (or never fetched)."""
+    return sorted(k for k, t in index["tried"].items() if t - index["fetched"].get(k, 0) > week)
+
 def outcome(written, failed):
     """Exit status: red when failures match or outnumber successes, or more than a few cells failed,
     so a degraded rollout is visible."""
@@ -259,6 +263,10 @@ def run(wanted, index, now):
         print(f"{row},{col}: {len(elements)} elements ({', '.join(names)})")
         time.sleep(1.5)
     print(f"written {written}, fresh {skipped}, failed {failed}")
+    stuck = stuck_cells(index)
+    if stuck:
+        # Cells that keep failing (often one too heavy for Overpass) keep their old file; say so.
+        print(f"::warning::{len(stuck)} cells have not refreshed in a week of tries: {', '.join(stuck[:20])}")
     return outcome(written, failed)
 
 if __name__ == "__main__":
