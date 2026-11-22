@@ -149,9 +149,11 @@ def order(cells, index):
         return max(index["fetched"].get(key, 0), index["tried"].get(key, 0))
     return sorted(cells, key=lambda cell: (last(cell), cell))
 
-def stuck_cells(index, week=7 * 86400):
-    """Cells tried more than a week after their last successful fetch (or never fetched)."""
-    return sorted(k for k, t in index["tried"].items() if t - index["fetched"].get(k, 0) > week)
+def stuck_cells(index, wanted=None, week=7 * 86400):
+    """Cells still wanted that were tried more than a week after their last successful fetch."""
+    keep = None if wanted is None else {f"{r}_{c}" for r, c in wanted}
+    return sorted(k for k, t in index["tried"].items()
+                  if (keep is None or k in keep) and t - index["fetched"].get(k, 0) > week)
 
 def outcome(written, failed):
     """Exit status: red when failures match or outnumber successes, or more than a few cells failed,
@@ -253,6 +255,8 @@ def well_formed(element):
     if tags is not None and not (isinstance(tags, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items())):
         return False
     members = element.get("members")
+    if members is not None and not isinstance(members, list):
+        return False
     if isinstance(members, list):
         for m in members:
             if not isinstance(m, dict) or ("role" in m and m["role"] is not None and not isinstance(m["role"], str)):
@@ -320,7 +324,7 @@ def run(wanted, index, now):
         print(f"{row},{col}: {len(elements)} elements ({', '.join(names)})")
         time.sleep(1.5)
     print(f"written {written}, fresh {skipped}, failed {failed}")
-    stuck = stuck_cells(index)
+    stuck = stuck_cells(index, wanted)
     if stuck:
         # Cells that keep failing (often one too heavy for Overpass) keep their old file; say so.
         print(f"::warning::{len(stuck)} cells have not refreshed in a week of tries: {', '.join(stuck[:20])}")
