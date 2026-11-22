@@ -62,11 +62,41 @@ def fetch(row, col):
 INDEX = OUT.parent / "_data" / "indoor_fetched.json"
 
 def load_index():
+    """{"fetched": {cell: time}, "tried": {cell: time}}; anything unreadable counts as empty."""
     try:
-        index = json.loads(INDEX.read_bytes())
+        raw = json.loads(INDEX.read_bytes())
     except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in index.items() if isinstance(v, (int, float))} if isinstance(index, dict) else {}
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    def times(name):
+        part = raw.get(name)
+        return {k: v for k, v in part.items() if isinstance(v, (int, float))} if isinstance(part, dict) else {}
+    return {"fetched": times("fetched"), "tried": times("tried")}
+
+def save_index(index):
+    INDEX.parent.mkdir(exist_ok=True)
+    body = {name: dict(sorted(index[name].items())) for name in ("fetched", "tried")}
+    write_atomic(INDEX, (json.dumps(body, indent=0) + "\n").encode())
+
+def write_atomic(path, body):
+    """Write to a sibling and rename, so a failed write never leaves half a file to be committed."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(body)
+    os.replace(tmp, path)
+
+def order(cells, index):
+    """Cells to work on, least recently attempted first. A run cut off by the time budget, or a
+    --refresh, picks up where the last one stopped instead of starting over at the same cells, and
+    a cell that keeps failing goes to the back once tried."""
+    def last(cell):
+        key = f"{cell[0]}_{cell[1]}"
+        return max(index["fetched"].get(key, 0), index["tried"].get(key, 0))
+    return sorted(cells, key=lambda cell: (last(cell), cell))
+
+def outcome(written, failed):
+    """Exit status: red when more than a few cells failed, so a degraded rollout is visible."""
+    return 1 if failed > max(3, written // 10) else 0
 
 def slim(elements):
     """Drop what no app reads. `out body` adds every way's node ids (~20% of a cell)."""
@@ -121,20 +151,21 @@ def main():
     try:
         return run(wanted, index, now)
     finally:
-        INDEX.parent.mkdir(exist_ok=True)
-        INDEX.write_text(json.dumps(dict(sorted(index.items())), indent=0) + "\n")
+        save_index(index)
 
 def run(wanted, index, now):
     written = skipped = failed = 0
-    for (row, col), names in sorted(wanted.items()):
+    for row, col in order(wanted, index):
+        names = wanted[(row, col)]
         if time.time() - STARTED > BUDGET_SECONDS:
             print("time budget used; the next run continues from here")
             break
         path = OUT / f"indoor_{row}_{col}.json"
         key = f"{row}_{col}"
-        if "--refresh" not in sys.argv and is_fresh(path, index.get(key), now):
+        if "--refresh" not in sys.argv and is_fresh(path, index["fetched"].get(key), now):
             skipped += 1
             continue
+        index["tried"][key] = int(time.time())
         data = fetch(row, col)
         if data is None:
             failed += 1
@@ -144,13 +175,13 @@ def run(wanted, index, now):
         # Empty cells are written too, so the app's lookup is a fast 200 instead of a slow Overpass call.
         body = encode(elements)
         if not path.exists() or path.read_bytes() != body:
-            path.write_bytes(body)
-        index[key] = int(time.time())
+            write_atomic(path, body)
+        index["fetched"][key] = int(time.time())
         written += 1
         print(f"{row},{col}: {len(elements)} elements ({', '.join(names)})")
         time.sleep(1.5)
     print(f"written {written}, fresh {skipped}, failed {failed}")
-    return 1 if failed and not written else 0
+    return outcome(written, failed)
 
 if __name__ == "__main__":
     sys.exit(main())

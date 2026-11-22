@@ -14,7 +14,8 @@ Kova Maps uses one version number across iPhone, Android and the web.
 - A partial answer from OpenStreetMap (a timeout or memory limit, reported as a remark) is retried on another server instead of overwriting a good cell.
 - The nightly build keeps when each cell was fetched in `_data/indoor_fetched.json` and refreshes cells older than 14 days by that time. It used to read the file's date, which every checkout resets, so cells were never refreshed. Cells from the old query are rebuilt on the next runs, and a cell whose map data hasn't changed is not rewritten.
 - Cells leave out the node id lists OpenStreetMap now sends with every way; no app reads them, and they would have made cells about 20% bigger.
-- The publisher's freshness and answer checks have tests, run before every nightly build.
+- Cells are worked through least recently tried first, so a run cut off by its time limit (or a manual refresh) carries on where the last one stopped, and a cell that keeps failing no longer holds up the rest. Cells are written to a temporary file and renamed, so a failed write never publishes half a file. The run shows red when more than a few cells fail, and the commit is replayed on top of main if main moved during the run.
+- The publisher's freshness, scheduling and answer checks have tests, run before every nightly build.
 
 ## Site 1.1.0 — November 2026
 
