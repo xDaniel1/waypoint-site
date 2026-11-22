@@ -385,7 +385,13 @@ def run(wanted, index, now):
             write_atomic(path, body)
         if base:
             index["osm"][key] = base
-        index["fetched"][key] = int(time.time())
+        age = snapshot_age(base)
+        if age is not None and age <= CURRENT:
+            index["fetched"][key] = int(time.time())
+        else:
+            # Data from a lagging server is better than none, but doesn't count as a refresh: the
+            # cell stays due and is asked for again next run, when a current server may answer.
+            print(f"  {row},{col}: kept a lagging answer ({base}); due again next run", file=sys.stderr)
         written += 1
         if written % 25 == 0:
             save_index(index)  # a hard-killed job keeps most of its progress

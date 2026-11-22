@@ -255,6 +255,19 @@ class Files(unittest.TestCase):
         finally:
             b.urllib.request.urlopen = real
 
+    def test_only_a_current_answer_restarts_the_clock(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        old_out, old_index, old_fetch = b.OUT, b.INDEX, b.fetch
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        try:
+            b.OUT, b.INDEX = d, d / "_data" / "i.json"
+            b.fetch = lambda row, col, not_before=None: json.dumps({"osm3s": {"timestamp_osm_base": now}, "elements": []}).encode()
+            index = b.load_index()
+            b.run({(1, 2): ["X"]}, index, time.time())
+            self.assertGreater(index["fetched"]["1_2"], 0)
+        finally:
+            b.OUT, b.INDEX, b.fetch = old_out, old_index, old_fetch
+
     def test_impossible_snapshots_are_ignored(self):
         for v in ("9999-99-99T99:99:99Z", "2999-01-01T00:00:00Z", "2026-11-22 07:20:03", 5):
             self.assertFalse(b.is_snapshot(v), v)
@@ -281,6 +294,7 @@ class Files(unittest.TestCase):
             index["fetched"]["1_2"] = 0  # make it due again
             b.run({(1, 2): ["X"]}, index, time.time())
             self.assertEqual(seen, [None, "2026-11-01T00:00:00Z"])
+            self.assertEqual(index["fetched"].get("1_2", 0), 0)  # old snapshots: not a refresh
             self.assertEqual(index["osm"]["1_2"], "2026-11-03T00:00:00Z")
             self.assertEqual(json.loads((d / "indoor_1_2.json").read_text())["osm_base"], "2026-11-03T00:00:00Z")
         finally:
