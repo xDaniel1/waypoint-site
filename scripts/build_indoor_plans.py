@@ -25,7 +25,8 @@ def venues():
     url = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1/venues?select=short_name,latitude,longitude,radius_m,sources&enabled=eq.true"
     key = os.environ["SUPABASE_ANON_KEY"]
     req = urllib.request.Request(url, headers={"apikey": key, "Authorization": f"Bearer {key}"})
-    return json.load(urllib.request.urlopen(req, timeout=30))
+    with hard_limit(60):  # a hung startup must not eat the night's budget
+        return json.load(urllib.request.urlopen(req, timeout=30))
 
 def cells_for(lat, lon, radius_m):
     dlat = radius_m / 111_320
@@ -97,7 +98,7 @@ def fetch(row, col):
                 with hard_limit(REQUEST_TIMEOUT):
                     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
                         data = read_capped(response, REQUEST_TIMEOUT)
-                check_answer(data)
+                    check_answer(data)
                 return data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
@@ -198,19 +199,12 @@ def check_answer(data):
     return parsed["elements"]
 
 def has_members(element):
-    """Relations must carry members with geometry (the outline); other elements pass. The query
-    only asks for terminal and station relations, and those are always drawn from their members."""
+    """Relations must carry a member list, which the old `out tags` query left out. Members
+    without usable points are allowed: that is how the map data is, every retry would get the
+    same, and rejecting it would keep the whole cell from ever refreshing. The apps skip them."""
     if not isinstance(element, dict):
         return False
-    if element.get("type") != "relation":
-        return True
-    members = element.get("members")
-    if not isinstance(members, list) or not members or not all(isinstance(m, dict) for m in members):
-        return False
-    # `out geom` gives way members their points. A relation made only of other relations gets none,
-    # and must not block its cell forever, so only way members are held to it.
-    ways = [m for m in members if m.get("type") == "way"]
-    return not ways or any(isinstance(m.get("geometry"), list) and len(m["geometry"]) >= 2 for m in ways)
+    return element.get("type") != "relation" or isinstance(element.get("members"), list)
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -244,6 +238,9 @@ def run(wanted, index, now):
             data = fetch(row, col)
         except BudgetSpent:
             print("time budget used; the next run continues from here")
+            if not written and not failed:
+                print("no cell was tried in this run")
+                return 1
             break
         index["tried"][key] = int(time.time())
         if data is None:

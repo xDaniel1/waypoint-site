@@ -62,17 +62,18 @@ class Answers(unittest.TestCase):
                 b.check_answer(body)
 
     def test_relation_without_members_is_rejected(self):
+        # What the old `out tags geom` query returned.
         for body in (b'{"elements":[{"type":"relation","id":1}]}', b'{"elements":[{"type":"relation","members":null}]}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
+
+    def test_members_without_points_are_kept(self):
+        # Map data as it is: every retry would get the same, so rejecting would block the cell for good.
         for body in (b'{"elements":[{"type":"relation","members":[]}]}',
-                     b'{"elements":[{"type":"relation","members":[{"type":"way","role":"outer"}]}]}'):
-            with self.assertRaises(ValueError):
-                b.check_answer(body)  # no outline to draw
-        nested = b'{"elements":[{"type":"relation","members":[{"type":"relation","ref":5,"role":""}]}]}'
-        self.assertEqual(len(b.check_answer(nested)), 1)  # nothing for `out geom` to fill in
-        ok = b'{"elements":[{"type":"relation","members":[{"type":"way","role":"","geometry":[{"lat":0,"lon":0},{"lat":0,"lon":1}]}]},{"type":"way"}]}'
-        self.assertEqual(len(b.check_answer(ok)), 2)
+                     b'{"elements":[{"type":"relation","members":[{"type":"way","role":"outer"}]}]}',
+                     b'{"elements":[{"type":"relation","members":[{"type":"way","geometry":[null,null]}]}]}',
+                     b'{"elements":[{"type":"relation","members":[{"type":"relation","ref":5,"role":""}]}]}'):
+            self.assertEqual(len(b.check_answer(body)), 1)
 
     def test_slim_drops_node_ids_and_keeps_geometry(self):
         way = {"type": "way", "nodes": [1, 2], "geometry": [{"lat": 0, "lon": 0}]}
@@ -176,7 +177,7 @@ class Files(unittest.TestCase):
             real = b.time_left
             calls = iter([b.REQUEST_TIMEOUT + 1, 1])
             b.time_left = lambda: next(calls, 0)
-            self.assertEqual(b.run(cells, index, time.time()), 0)
+            self.assertEqual(b.run(cells, index, time.time()), 1)  # nothing tried at all is red
         finally:
             b.BUDGET_SECONDS = old
             b.time_left = real
