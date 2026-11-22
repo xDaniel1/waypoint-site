@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the commit step rebases onto main, which may have moved
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -60,7 +62,8 @@ jobs:
         # not documented to trigger it, so ask for a build when the live one is behind, and go red
         # if none containing this commit gets built. A newer build (someone merged meanwhile)
         # counts, since it contains these cells.
-        if: always() && github.ref == 'refs/heads/main'
+        # Skipped when the commit step failed: its commit never reached GitHub to be published.
+        if: always() && github.ref == 'refs/heads/main' && steps.commit.outcome != 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
