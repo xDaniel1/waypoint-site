@@ -82,17 +82,14 @@ class hard_limit:
 
 def fetch(row, col):
     """The cell's Overpass answer, or None when every server failed. Raises BudgetSpent if there was
-    no time for even one request, so the cell is not counted as tried."""
+    no time for the next request, so the cell is not counted as tried."""
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
-    requested = False
     for attempt in range(2):
         for endpoint in ENDPOINTS:
             # No new request that could run past the budget; the cell is retried next run.
             if time_left() < REQUEST_TIMEOUT:
-                if not requested:
-                    raise BudgetSpent()
-                return None
-            requested = True
+                # Out of time, not a failed cell: it keeps its place for the next run.
+                raise BudgetSpent()
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
                 with hard_limit(REQUEST_TIMEOUT):
@@ -161,12 +158,53 @@ def outcome(written, failed):
     so a degraded rollout is visible."""
     return 1 if failed and (failed >= written or failed > max(3, written // 10)) else 0
 
+def point(p):
+    return isinstance(p, dict) and all(isinstance(p.get(k), (int, float)) and not isinstance(p.get(k), bool) and math.isfinite(p[k]) for k in ("lat", "lon"))
+
+def runs(geometry):
+    """The stretches of a way between points Overpass couldn't place (it writes null for them)."""
+    out, run = [], []
+    for p in geometry:
+        if point(p):
+            run.append(p)
+        else:
+            if len(run) >= 2:
+                out.append(run)
+            run = []
+    if len(run) >= 2:
+        out.append(run)
+    return out
+
 def slim(elements):
-    """Drop what no app reads. `out body` adds every way's node ids (~20% of a cell)."""
+    """What the apps read, in a shape every build can decode.
+
+    Drops the node id lists `out body` adds to every way (~20% of a cell). Overpass writes null
+    for a point it can't place, and iPhone builds decode geometry as a list of points, so one null
+    would fail the whole cell: a relation member is split into its placed stretches, and a way or
+    node with an unplaceable point is left out."""
+    out = []
     for e in elements:
-        if isinstance(e, dict):
-            e.pop("nodes", None)
-    return elements
+        e.pop("nodes", None)
+        kind = e.get("type")
+        if kind == "node" and ("lat" in e or "lon" in e) and not point(e):
+            continue
+        if kind == "way" and "geometry" in e:
+            g = e["geometry"]
+            if not isinstance(g, list) or not all(point(p) for p in g):
+                continue
+        if kind == "relation" and isinstance(e.get("members"), list):
+            members = []
+            for m in e["members"]:
+                g = m.get("geometry") if isinstance(m, dict) else None
+                if not isinstance(m, dict):
+                    continue
+                if g is None or (isinstance(g, list) and all(point(p) for p in g)):
+                    members.append(m)
+                elif isinstance(g, list):
+                    members.extend({**m, "geometry": r} for r in runs(g))
+            e["members"] = members
+        out.append(e)
+    return out
 
 def encode(elements):
     return json.dumps({"elements": elements}, separators=(",", ":")).encode()
@@ -198,9 +236,16 @@ def check_answer(data):
         raise ValueError("no elements list")
     if "remark" in parsed:
         raise ValueError(f"partial answer: {str(parsed['remark'])[:120]}")
+    if not all(well_formed(e) for e in parsed["elements"]):
+        raise ValueError("an element is not a node, way or relation with an id")
     if not all(has_members(e) for e in parsed["elements"]):
         raise ValueError("a relation came back without its members")
     return parsed["elements"]
+
+def well_formed(element):
+    """An element the apps can decode: a node, way or relation with a numeric id."""
+    return (isinstance(element, dict) and element.get("type") in ("node", "way", "relation")
+            and isinstance(element.get("id"), int) and not isinstance(element.get("id"), bool))
 
 def has_members(element):
     """Relations must carry a member list, which the old `out tags` query left out. Members

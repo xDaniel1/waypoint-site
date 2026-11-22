@@ -50,7 +50,7 @@ class Freshness(unittest.TestCase):
 
 class Answers(unittest.TestCase):
     def test_whole_answer_is_accepted(self):
-        self.assertEqual(b.check_answer(b'{"elements":[{"type":"way"}]}'), [{"type": "way"}])
+        self.assertEqual(b.check_answer(b'{"elements":[{"type":"way","id":2}]}'), [{"type": "way", "id": 2}])
 
     def test_partial_answer_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -63,17 +63,35 @@ class Answers(unittest.TestCase):
 
     def test_relation_without_members_is_rejected(self):
         # What the old `out tags geom` query returned.
-        for body in (b'{"elements":[{"type":"relation","id":1}]}', b'{"elements":[{"type":"relation","members":null}]}'):
+        for body in (b'{"elements":[{"type":"relation","id":1}]}', b'{"elements":[{"type":"relation","id":1,"members":null}]}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
 
     def test_members_without_points_are_kept(self):
         # Map data as it is: every retry would get the same, so rejecting would block the cell for good.
-        for body in (b'{"elements":[{"type":"relation","members":[]}]}',
-                     b'{"elements":[{"type":"relation","members":[{"type":"way","role":"outer"}]}]}',
-                     b'{"elements":[{"type":"relation","members":[{"type":"way","geometry":[null,null]}]}]}',
-                     b'{"elements":[{"type":"relation","members":[{"type":"relation","ref":5,"role":""}]}]}'):
+        for body in (b'{"elements":[{"type":"relation","id":1,"members":[]}]}',
+                     b'{"elements":[{"type":"relation","id":1,"members":[{"type":"way","role":"outer"}]}]}',
+                     b'{"elements":[{"type":"relation","id":1,"members":[{"type":"way","geometry":[null,null]}]}]}',
+                     b'{"elements":[{"type":"relation","id":1,"members":[{"type":"relation","id":1,"ref":5,"role":""}]}]}'):
             self.assertEqual(len(b.check_answer(body)), 1)
+
+    def test_malformed_elements_are_rejected(self):
+        for body in (b'{"elements":[{}]}', b'{"elements":[{"type":"area","id":1}]}', b'{"elements":[{"type":"way"}]}', b'{"elements":[1]}'):
+            with self.assertRaises(ValueError):
+                b.check_answer(body)
+
+    def test_slim_leaves_no_null_points(self):
+        p = lambda lat, lon: {"lat": lat, "lon": lon}
+        els = [
+            {"type": "relation", "id": 1, "members": [{"type": "way", "role": "", "geometry": [p(0, 0), p(0, 1), None, p(1, 1), p(1, 0), None, p(2, 2)]}]},
+            {"type": "way", "id": 2, "geometry": [p(0, 0), None, p(1, 1)]},
+            {"type": "node", "id": 3, "lat": None, "lon": None},
+            {"type": "way", "id": 4, "geometry": [p(0, 0), p(1, 1)]},
+        ]
+        out = b.slim(els)
+        self.assertEqual([e["id"] for e in out], [1, 4])
+        self.assertEqual([len(m["geometry"]) for m in out[0]["members"]], [2, 2])
+        self.assertNotIn("null", json.dumps(out))
 
     def test_slim_drops_node_ids_and_keeps_geometry(self):
         way = {"type": "way", "nodes": [1, 2], "geometry": [{"lat": 0, "lon": 0}]}

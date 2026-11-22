@@ -55,19 +55,33 @@ jobs:
           git push
           echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: Publish
-        # Pages has built every bot refresh so far, but a GITHUB_TOKEN push is not documented to
-        # trigger it, so ask for the build and wait for it. The job goes red if it does not publish.
-        if: always() && github.ref == 'refs/heads/main' && steps.commit.outputs.pushed == 'true'
+        # Every run checks that Pages serves what is on main, including cells pushed by an earlier
+        # run whose build failed. Pages has built every bot push so far, but a GITHUB_TOKEN push is
+        # not documented to trigger it, so ask for a build when the live one is behind, and go red
+        # if none containing this commit gets built. A newer build (someone merged meanwhile)
+        # counts, since it contains these cells.
+        if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           sha=$(git rev-parse HEAD)
-          gh api -X POST "repos/${{ github.repository }}/pages/builds" >/dev/null
-          # Wait for the build of this commit and fail the job if Pages could not publish it.
+          contains() {  # does commit $1 contain $sha?
+            s=$(gh api "repos/$REPO/compare/$sha...$1" --jq .status 2>/dev/null) || return 1
+            [ "$s" = identical ] || [ "$s" = ahead ]
+          }
+          asked=no
           for i in $(seq 1 40); do
-            read -r commit status < <(gh api "repos/${{ github.repository }}/pages/builds/latest" --jq '"\(.commit) \(.status)"')
-            if [ "$commit" = "$sha" ] && [ "$status" = "built" ]; then echo "Pages built $sha"; exit 0; fi
-            if [ "$commit" = "$sha" ] && [ "$status" = "errored" ]; then echo "::error::Pages build of $sha errored"; exit 1; fi
+            if out=$(gh api "repos/$REPO/pages/builds/latest" --jq '"\(.commit) \(.status)"' 2>/dev/null); then
+              read -r commit status <<< "$out"
+              if [ "$status" = built ] && contains "$commit"; then echo "Pages serves $commit, which contains $sha"; exit 0; fi
+              if [ "$status" = errored ] && contains "$commit"; then echo "::error::Pages build of $commit errored"; exit 1; fi
+              if [ "$asked" = no ] && [ "$status" != building ] && [ "$status" != queued ]; then
+                gh api -X POST "repos/$REPO/pages/builds" >/dev/null 2>&1 && asked=yes || echo "build request failed; retrying"
+              fi
+            else
+              echo "Pages status unavailable; retrying"
+            fi
             sleep 15
           done
-          echo "::error::Pages did not finish building $sha within 10 minutes"; exit 1
+          echo "::error::Pages did not publish $sha within 10 minutes"; exit 1
