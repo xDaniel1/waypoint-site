@@ -53,8 +53,18 @@ jobs:
           git push
       - name: Publish
         # Pages has built every bot refresh so far, but a GITHUB_TOKEN push is not documented to
-        # trigger it, so ask for the build. A failure here leaves the cells on main for the next build.
+        # trigger it, so ask for the build and wait for it. The job goes red if it does not publish.
         if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "::warning::Pages build request failed"
+        run: |
+          sha=$(git rev-parse HEAD)
+          gh api -X POST "repos/${{ github.repository }}/pages/builds" >/dev/null
+          # Wait for the build of this commit and fail the job if Pages could not publish it.
+          for i in $(seq 1 40); do
+            read -r commit status < <(gh api "repos/${{ github.repository }}/pages/builds/latest" --jq '"\(.commit) \(.status)"')
+            if [ "$commit" = "$sha" ] && [ "$status" = "built" ]; then echo "Pages built $sha"; exit 0; fi
+            if [ "$commit" = "$sha" ] && [ "$status" = "errored" ]; then echo "::error::Pages build of $sha errored"; exit 1; fi
+            sleep 15
+          done
+          echo "::error::Pages did not finish building $sha within 10 minutes"; exit 1

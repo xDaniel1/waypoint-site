@@ -101,6 +101,8 @@ class Scheduling(unittest.TestCase):
         self.assertEqual(b.outcome(written=1, failed=300), 1)
         self.assertEqual(b.outcome(written=0, failed=0), 0)
         self.assertEqual(b.outcome(written=0, failed=1), 1)  # the only stale cell failed
+        self.assertEqual(b.outcome(written=1, failed=3), 1)  # a small retry run that mostly failed
+        self.assertEqual(b.outcome(written=4, failed=1), 0)
 
 
 class Files(unittest.TestCase):

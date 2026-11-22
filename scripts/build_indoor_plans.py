@@ -153,9 +153,9 @@ def order(cells, index):
     return sorted(cells, key=lambda cell: (last(cell), cell))
 
 def outcome(written, failed):
-    """Exit status: red when every attempted cell failed, or more than a few did, so a degraded
-    rollout is visible."""
-    return 1 if failed and (not written or failed > max(3, written // 10)) else 0
+    """Exit status: red when failures match or outnumber successes, or more than a few cells failed,
+    so a degraded rollout is visible."""
+    return 1 if failed and (failed >= written or failed > max(3, written // 10)) else 0
 
 def slim(elements):
     """Drop what no app reads. `out body` adds every way's node ids (~20% of a cell)."""
