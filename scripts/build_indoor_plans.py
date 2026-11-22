@@ -37,7 +37,7 @@ def cells_for(lat, lon, radius_m):
 def query(row, col):
     s, w = row * CELL - MARGIN, col * CELL - MARGIN
     box = f"{s},{w},{s + CELL + 2 * MARGIN},{w + CELL + 2 * MARGIN}"
-    return (f"[out:json][timeout:25];(way[indoor]({box});way[level][shop]({box});way[level][amenity]({box});"
+    return (f"[out:json][timeout:60];(way[indoor]({box});way[level][shop]({box});way[level][amenity]({box});"
             f"way[highway=steps][level]({box});way[aeroway=gate]({box});"
             f"node[shop][level]({box});node[amenity][level]({box});node[aeroway=gate]({box});"
             f"way[aeroway=terminal]({box});way[building=train_station]({box});way[building=transportation]({box});"
@@ -49,7 +49,7 @@ def fetch(row, col):
         for endpoint in ENDPOINTS:
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
-                data = urllib.request.urlopen(req, timeout=45).read()
+                data = urllib.request.urlopen(req, timeout=75).read()
                 check_answer(data)
                 return data
             except Exception as error:
@@ -58,7 +58,8 @@ def fetch(row, col):
     return None
 
 # When each cell was last fetched. Kept out of the cell files, so a cell whose map data hasn't
-# changed is not rewritten (no diff, no new commit). Jekyll does not publish _data/.
+# changed is not rewritten, so a refresh commits only the cells that changed plus this index.
+# Jekyll does not publish _data/.
 INDEX = OUT.parent / "_data" / "indoor_fetched.json"
 
 def load_index():

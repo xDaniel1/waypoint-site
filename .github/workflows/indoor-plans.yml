@@ -40,7 +40,7 @@ jobs:
         run: |
           git config user.name "waypoint-bot"
           git config user.email "noreply@waypoint.app"
-          git add indoor _data/indoor_fetched.json
+          git add indoor _data
           git diff --cached --quiet && echo "no changes" || git commit -m "Refresh indoor plans $(date -u +%F)"
           # main may have moved during the hours of fetching; only this job writes indoor/ and the
           # index, so replaying the commit on top is safe.
