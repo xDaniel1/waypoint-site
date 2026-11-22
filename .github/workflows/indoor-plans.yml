@@ -71,11 +71,15 @@ jobs:
             [ "$s" = identical ] || [ "$s" = ahead ]
           }
           asked=no
+          seen=no
           for i in $(seq 1 40); do
             if out=$(gh api "repos/$REPO/pages/builds/latest" --jq '"\(.commit) \(.status)"' 2>/dev/null); then
               read -r commit status <<< "$out"
               if [ "$status" = built ] && contains "$commit"; then echo "Pages serves $commit, which contains $sha"; exit 0; fi
-              if [ "$status" = errored ] && contains "$commit"; then echo "::error::Pages build of $commit errored"; exit 1; fi
+              # An errored build (tonight's or an earlier night's) gets one rebuild; red only if
+              # the rebuild errors too.
+              if [ "$status" = errored ] && contains "$commit" && [ "$asked" = yes ] && [ "$seen" = yes ]; then echo "::error::Pages rebuild of $commit errored"; exit 1; fi
+              if [ "$asked" = yes ] && { [ "$status" = building ] || [ "$status" = queued ]; }; then seen=yes; fi
               if [ "$asked" = no ] && [ "$status" != building ] && [ "$status" != queued ]; then
                 gh api -X POST "repos/$REPO/pages/builds" >/dev/null 2>&1 && asked=yes || echo "build request failed; retrying"
               fi

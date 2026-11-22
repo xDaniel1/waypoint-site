@@ -243,9 +243,20 @@ def check_answer(data):
     return parsed["elements"]
 
 def well_formed(element):
-    """An element the apps can decode: a node, way or relation with a numeric id."""
-    return (isinstance(element, dict) and element.get("type") in ("node", "way", "relation")
-            and isinstance(element.get("id"), int) and not isinstance(element.get("id"), bool))
+    """An element the apps' strict decoders accept: a node, way or relation with a numeric id,
+    string tags, and members whose role is a string."""
+    if not (isinstance(element, dict) and element.get("type") in ("node", "way", "relation")
+            and isinstance(element.get("id"), int) and not isinstance(element.get("id"), bool)):
+        return False
+    tags = element.get("tags")
+    if tags is not None and not (isinstance(tags, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items())):
+        return False
+    members = element.get("members")
+    if isinstance(members, list):
+        for m in members:
+            if not isinstance(m, dict) or ("role" in m and m["role"] is not None and not isinstance(m["role"], str)):
+                return False
+    return True
 
 def has_members(element):
     """Relations must carry a member list, which the old `out tags` query left out. Members

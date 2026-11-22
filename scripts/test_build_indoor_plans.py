@@ -76,7 +76,9 @@ class Answers(unittest.TestCase):
             self.assertEqual(len(b.check_answer(body)), 1)
 
     def test_malformed_elements_are_rejected(self):
-        for body in (b'{"elements":[{}]}', b'{"elements":[{"type":"area","id":1}]}', b'{"elements":[{"type":"way"}]}', b'{"elements":[1]}'):
+        for body in (b'{"elements":[{}]}', b'{"elements":[{"type":"area","id":1}]}', b'{"elements":[{"type":"way"}]}', b'{"elements":[1]}',
+                     b'{"elements":[{"type":"way","id":1,"tags":{"level":1}}]}',
+                     b'{"elements":[{"type":"relation","id":1,"members":[{"type":"way","role":3}]}]}'):
             with self.assertRaises(ValueError):
                 b.check_answer(body)
 
