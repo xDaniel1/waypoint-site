@@ -7,6 +7,12 @@ permalink: /changelog
 
 Kova Maps uses one version number across iPhone, Android and the web.
 
+## Site 1.1.2 — November 2026
+
+**Indoor plans**
+- A cell that a manual refresh could only get from a lagging OpenStreetMap server is asked for again the next night, even if it was refreshed recently.
+- A manual test run from another branch runs in its own queue, so it can't delay the nightly refresh.
+
 ## Site 1.1.1 — November 2026
 
 **Indoor plans** (kovamaps.com/indoor)

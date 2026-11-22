@@ -391,6 +391,9 @@ def run(wanted, index, now):
         else:
             # Data from a lagging server is better than none, but doesn't count as a refresh: the
             # cell stays due and is asked for again next run, when a current server may answer.
+            # Clearing the old time matters for a --refresh run, which can reach a cell that was
+            # still fresh: otherwise the next nightly run would skip it for up to 14 days.
+            index["fetched"].pop(key, None)
             print(f"  {row},{col}: kept a lagging answer ({base}); due again next run", file=sys.stderr)
         written += 1
         if written % 25 == 0:

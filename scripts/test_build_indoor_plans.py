@@ -255,6 +255,21 @@ class Files(unittest.TestCase):
         finally:
             b.urllib.request.urlopen = real
 
+    def test_a_lagging_answer_on_a_fresh_cell_leaves_it_due(self):
+        # A --refresh run reaches a cell fetched 3 days ago and only a lagging server answers.
+        d = pathlib.Path(tempfile.mkdtemp())
+        old_out, old_index, old_fetch = b.OUT, b.INDEX, b.fetch
+        try:
+            b.OUT, b.INDEX = d, d / "_data" / "i.json"
+            b.fetch = lambda row, col, not_before=None: json.dumps({"osm3s": {"timestamp_osm_base": "2026-01-01T00:00:00Z"}, "elements": []}).encode()
+            index = b.load_index()
+            index["fetched"]["1_2"] = int(time.time()) - 3 * DAY
+            b.run({(1, 2): ["X"]}, index, time.time())
+            self.assertNotIn("1_2", index["fetched"])
+            self.assertFalse(b.is_fresh(d / "indoor_1_2.json", index["fetched"].get("1_2"), time.time()))
+        finally:
+            b.OUT, b.INDEX, b.fetch = old_out, old_index, old_fetch
+
     def test_only_a_current_answer_restarts_the_clock(self):
         d = pathlib.Path(tempfile.mkdtemp())
         old_out, old_index, old_fetch = b.OUT, b.INDEX, b.fetch

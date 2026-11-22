@@ -17,7 +17,8 @@ permissions:
   pages: write
 
 concurrency:
-  group: indoor-plans
+  # One queue per branch: a manual test run from another branch can't hold up the nightly refresh.
+  group: indoor-plans-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
