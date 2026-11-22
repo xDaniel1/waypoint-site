@@ -50,35 +50,62 @@ def fetch(row, col):
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
                 data = urllib.request.urlopen(req, timeout=45).read()
-                parsed = json.loads(data)
-                if not isinstance(parsed.get("elements"), list):
-                    raise ValueError("no elements list")
-                # Overpass reports a timeout or out-of-memory as a 200 with partial results and a
-                # "remark". Writing that would replace a good cell with a broken one.
-                if "remark" in parsed:
-                    raise ValueError(f"partial answer: {str(parsed['remark'])[:120]}")
+                check_answer(data)
                 return data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
         time.sleep(5 * (attempt + 1))
     return None
 
-def is_fresh(path, now):
-    """A cell is fresh if it was fetched less than MAX_AGE_DAYS ago, by the time stored in the file.
+# When each cell was last fetched. Kept out of the cell files, so a cell whose map data hasn't
+# changed is not rewritten (no diff, no new commit). Jekyll does not publish _data/.
+INDEX = OUT.parent / "_data" / "indoor_fetched.json"
+
+def load_index():
+    try:
+        index = json.loads(INDEX.read_bytes())
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in index.items() if isinstance(v, (int, float))} if isinstance(index, dict) else {}
+
+def slim(elements):
+    """Drop what no app reads. `out body` adds every way's node ids (~20% of a cell)."""
+    for e in elements:
+        if isinstance(e, dict):
+            e.pop("nodes", None)
+    return elements
+
+def encode(elements):
+    return json.dumps({"elements": elements}, separators=(",", ":")).encode()
+
+def is_fresh(path, fetched, now):
+    """A cell is fresh if the index says it was fetched under MAX_AGE_DAYS ago and its file is a
+    cell from the current query.
 
     File times can't be used: Actions checks the files out with new times, so every cell looked
-    fresh forever. Cells without a stored time, or written by the old query (relations without
-    members, so no outlines), are rebuilt."""
+    fresh forever. Cells never fetched into the index, or written by the old query (relations
+    without members, so no outlines), are rebuilt."""
+    if not isinstance(fetched, (int, float)) or now - fetched >= MAX_AGE_DAYS * 86400:
+        return False
     try:
         cell = json.loads(path.read_bytes())
     except (OSError, ValueError):
         return False
     if not isinstance(cell, dict) or not isinstance(cell.get("elements"), list):
         return False
-    fetched = cell.get("fetched_at")
-    if not isinstance(fetched, (int, float)) or now - fetched >= MAX_AGE_DAYS * 86400:
-        return False
     return all("members" in e for e in cell["elements"] if isinstance(e, dict) and e.get("type") == "relation")
+
+def check_answer(data):
+    """The elements of an Overpass answer, or ValueError when it is not a whole one.
+
+    Overpass reports a timeout or out-of-memory as a 200 with partial results and a "remark".
+    Writing that would replace a good cell with a broken one."""
+    parsed = json.loads(data)
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("elements"), list):
+        raise ValueError("no elements list")
+    if "remark" in parsed:
+        raise ValueError(f"partial answer: {str(parsed['remark'])[:120]}")
+    return parsed["elements"]
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -90,13 +117,22 @@ def main():
             wanted.setdefault(cell, []).append(venue["short_name"])
     print(f"{len(wanted)} cells across {len(set(sum(wanted.values(), [])))} venues")
     now = time.time()
+    index = load_index()
+    try:
+        return run(wanted, index, now)
+    finally:
+        INDEX.parent.mkdir(exist_ok=True)
+        INDEX.write_text(json.dumps(dict(sorted(index.items())), indent=0) + "\n")
+
+def run(wanted, index, now):
     written = skipped = failed = 0
     for (row, col), names in sorted(wanted.items()):
         if time.time() - STARTED > BUDGET_SECONDS:
             print("time budget used; the next run continues from here")
             break
         path = OUT / f"indoor_{row}_{col}.json"
-        if "--refresh" not in sys.argv and path.exists() and is_fresh(path, now):
+        key = f"{row}_{col}"
+        if "--refresh" not in sys.argv and is_fresh(path, index.get(key), now):
             skipped += 1
             continue
         data = fetch(row, col)
@@ -104,9 +140,12 @@ def main():
             failed += 1
             print(f"failed {row},{col} ({', '.join(names)})")
             continue
-        elements = json.loads(data)["elements"]
+        elements = slim(check_answer(data))
         # Empty cells are written too, so the app's lookup is a fast 200 instead of a slow Overpass call.
-        path.write_bytes(json.dumps({"fetched_at": int(time.time()), "elements": elements}, separators=(",", ":")).encode())
+        body = encode(elements)
+        if not path.exists() or path.read_bytes() != body:
+            path.write_bytes(body)
+        index[key] = int(time.time())
         written += 1
         print(f"{row},{col}: {len(elements)} elements ({', '.join(names)})")
         time.sleep(1.5)

@@ -28,6 +28,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Test the publisher
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Fetch plans
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -38,6 +40,6 @@ jobs:
         run: |
           git config user.name "waypoint-bot"
           git config user.email "noreply@waypoint.app"
-          git add indoor
+          git add indoor _data/indoor_fetched.json
           git diff --cached --quiet && echo "no changes" || git commit -m "Refresh indoor plans $(date -u +%F)"
           git push
