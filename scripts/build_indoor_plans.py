@@ -43,18 +43,27 @@ def query(row, col):
             f"way[aeroway=terminal]({box});way[building=train_station]({box});way[building=transportation]({box});"
             f"rel[aeroway=terminal]({box});rel[building=train_station]({box});rel[building=transportation]({box}););out body geom;")
 
+REQUEST_TIMEOUT = 75
+
+def time_left():
+    return BUDGET_SECONDS - (time.time() - STARTED)
+
 def fetch(row, col):
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
     for attempt in range(2):
         for endpoint in ENDPOINTS:
+            # No new request that could run past the budget; the cell is retried next run.
+            if time_left() < REQUEST_TIMEOUT:
+                return None
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
-                data = urllib.request.urlopen(req, timeout=75).read()
+                data = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT).read()
                 check_answer(data)
                 return data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
-        time.sleep(5 * (attempt + 1))
+        if time_left() > REQUEST_TIMEOUT + 10:
+            time.sleep(5 * (attempt + 1))
     return None
 
 # When each cell was last fetched. Kept out of the cell files, so a cell whose map data hasn't
@@ -83,8 +92,12 @@ def save_index(index):
 def write_atomic(path, body):
     """Write to a sibling and rename, so a failed write never leaves half a file to be committed."""
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(body)
-    os.replace(tmp, path)
+    try:
+        tmp.write_bytes(body)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 def order(cells, index):
     """Cells to work on, least recently attempted first. A run cut off by the time budget, or a
@@ -96,8 +109,9 @@ def order(cells, index):
     return sorted(cells, key=lambda cell: (last(cell), cell))
 
 def outcome(written, failed):
-    """Exit status: red when more than a few cells failed, so a degraded rollout is visible."""
-    return 1 if failed > max(3, written // 10) else 0
+    """Exit status: red when every attempted cell failed, or more than a few did, so a degraded
+    rollout is visible."""
+    return 1 if failed and (not written or failed > max(3, written // 10)) else 0
 
 def slim(elements):
     """Drop what no app reads. `out body` adds every way's node ids (~20% of a cell)."""
@@ -158,7 +172,7 @@ def run(wanted, index, now):
     written = skipped = failed = 0
     for row, col in order(wanted, index):
         names = wanted[(row, col)]
-        if time.time() - STARTED > BUDGET_SECONDS:
+        if time_left() < REQUEST_TIMEOUT:
             print("time budget used; the next run continues from here")
             break
         path = OUT / f"indoor_{row}_{col}.json"

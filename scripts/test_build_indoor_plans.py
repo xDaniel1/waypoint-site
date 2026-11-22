@@ -78,6 +78,7 @@ class Scheduling(unittest.TestCase):
         self.assertEqual(b.outcome(written=500, failed=60), 1)
         self.assertEqual(b.outcome(written=1, failed=300), 1)
         self.assertEqual(b.outcome(written=0, failed=0), 0)
+        self.assertEqual(b.outcome(written=0, failed=1), 1)  # the only stale cell failed
 
 
 class Files(unittest.TestCase):
@@ -88,6 +89,33 @@ class Files(unittest.TestCase):
         b.write_atomic(path, b'{"elements":[]}')
         self.assertEqual(path.read_text(), '{"elements":[]}')
         self.assertEqual([p.name for p in d.iterdir()], ["indoor_1_2.json"])
+
+    def test_failed_write_leaves_old_file_and_no_temp(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        path = d / "indoor_1_2.json"
+        path.write_text("old")
+        real = b.os.replace
+        b.os.replace = lambda *a: (_ for _ in ()).throw(OSError("disk full"))
+        try:
+            with self.assertRaises(OSError):
+                b.write_atomic(path, b"new")
+        finally:
+            b.os.replace = real
+        self.assertEqual(path.read_text(), "old")
+        self.assertEqual([p.name for p in d.iterdir()], ["indoor_1_2.json"])
+
+    def test_no_request_past_the_budget(self):
+        old = b.BUDGET_SECONDS
+        calls = []
+        real = b.urllib.request.urlopen
+        b.urllib.request.urlopen = lambda *a, **k: calls.append(1)
+        try:
+            b.BUDGET_SECONDS = time.time() - b.STARTED + 10  # 10 s left, less than one request
+            self.assertIsNone(b.fetch(1, 2))
+        finally:
+            b.BUDGET_SECONDS = old
+            b.urllib.request.urlopen = real
+        self.assertEqual(calls, [])
 
     def test_index_round_trips_and_ignores_junk(self):
         d = pathlib.Path(tempfile.mkdtemp())
