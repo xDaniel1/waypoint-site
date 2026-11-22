@@ -27,9 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Always today's main, never the commit the run was started from: a re-run, or a run
-          # queued behind another, must build on the cells and index already pushed.
-          ref: main
+          # On main, always today's main, never the commit the run was started from: a re-run, or
+          # a run queued behind another, must build on the cells and index already pushed. A manual
+          # run from another branch tests that branch's publisher (and never pushes).
+          ref: ${{ github.ref == 'refs/heads/main' && 'main' || github.ref }}
           fetch-depth: 0  # the commit step rebases onto main, which may have moved
       - uses: actions/setup-python@v5
         with:
