@@ -11,6 +11,8 @@ Kova Maps uses one version number across iPhone, Android and the web.
 
 **Indoor plans** (kovamaps.com/indoor)
 - Terminals and stations mapped as multipolygons (JFK Terminals 5, 7 and 8, Penn Station, Grand Central and others) now come with their outlines. The nightly build asked OpenStreetMap for their tags only, so the apps had no shape to draw. Same fix as iPhone build 76.
+- A partial answer from OpenStreetMap (a timeout or memory limit, reported as a remark) is retried on another server instead of overwriting a good cell.
+- Each cell records when it was fetched, and the nightly build refreshes cells older than 14 days by that time. It used to read the file's date, which every checkout resets, so cells were never refreshed. Cells from the old query are rebuilt on the next runs.
 
 ## Site 1.1.0 — November 2026
 

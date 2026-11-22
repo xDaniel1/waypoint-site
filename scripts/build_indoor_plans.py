@@ -50,12 +50,35 @@ def fetch(row, col):
             try:
                 req = urllib.request.Request(endpoint, data=body, headers={"User-Agent": "Waypoint indoor plans (github.com/xDaniel1/waypoint-site)"})
                 data = urllib.request.urlopen(req, timeout=45).read()
-                json.loads(data)["elements"]
+                parsed = json.loads(data)
+                if not isinstance(parsed.get("elements"), list):
+                    raise ValueError("no elements list")
+                # Overpass reports a timeout or out-of-memory as a 200 with partial results and a
+                # "remark". Writing that would replace a good cell with a broken one.
+                if "remark" in parsed:
+                    raise ValueError(f"partial answer: {str(parsed['remark'])[:120]}")
                 return data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
         time.sleep(5 * (attempt + 1))
     return None
+
+def is_fresh(path, now):
+    """A cell is fresh if it was fetched less than MAX_AGE_DAYS ago, by the time stored in the file.
+
+    File times can't be used: Actions checks the files out with new times, so every cell looked
+    fresh forever. Cells without a stored time, or written by the old query (relations without
+    members, so no outlines), are rebuilt."""
+    try:
+        cell = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(cell, dict) or not isinstance(cell.get("elements"), list):
+        return False
+    fetched = cell.get("fetched_at")
+    if not isinstance(fetched, (int, float)) or now - fetched >= MAX_AGE_DAYS * 86400:
+        return False
+    return all("members" in e for e in cell["elements"] if isinstance(e, dict) and e.get("type") == "relation")
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -73,7 +96,7 @@ def main():
             print("time budget used; the next run continues from here")
             break
         path = OUT / f"indoor_{row}_{col}.json"
-        if path.exists() and now - path.stat().st_mtime < MAX_AGE_DAYS * 86400 and "--refresh" not in sys.argv:
+        if "--refresh" not in sys.argv and path.exists() and is_fresh(path, now):
             skipped += 1
             continue
         data = fetch(row, col)
@@ -83,7 +106,7 @@ def main():
             continue
         elements = json.loads(data)["elements"]
         # Empty cells are written too, so the app's lookup is a fast 200 instead of a slow Overpass call.
-        path.write_bytes(json.dumps({"elements": elements}, separators=(",", ":")).encode())
+        path.write_bytes(json.dumps({"fetched_at": int(time.time()), "elements": elements}, separators=(",", ":")).encode())
         written += 1
         print(f"{row},{col}: {len(elements)} elements ({', '.join(names)})")
         time.sleep(1.5)
