@@ -238,6 +238,28 @@ class Files(unittest.TestCase):
         self.assertEqual(json.loads(b.encode([], "2026-11-22T00:00:00Z")), {"elements": [], "osm_base": "2026-11-22T00:00:00Z"})
         self.assertIsNone(b.snapshot_of(b'{"elements":[]}'))
 
+    def test_a_confirmed_cell_refuses_an_older_mirror(self):
+        # Accept X at snapshot 1, confirm X unchanged at snapshot 3: the guard is now 3, so Y from a
+        # mirror at snapshot 2 is refused.
+        d = pathlib.Path(tempfile.mkdtemp())
+        old_out, old_index, old_fetch = b.OUT, b.INDEX, b.fetch
+        snapshots = iter(["2026-11-01T00:00:00Z", "2026-11-03T00:00:00Z"])
+        seen = []
+        def fake_fetch(row, col, not_before=None):
+            seen.append(not_before)
+            return json.dumps({"osm3s": {"timestamp_osm_base": next(snapshots)}, "elements": []}).encode()
+        try:
+            b.OUT, b.INDEX, b.fetch = d, d / "_data" / "i.json", fake_fetch
+            index = b.load_index()
+            b.run({(1, 2): ["X"]}, index, time.time())
+            index["fetched"]["1_2"] = 0  # make it due again
+            b.run({(1, 2): ["X"]}, index, time.time())
+            self.assertEqual(seen, [None, "2026-11-01T00:00:00Z"])
+            self.assertEqual(index["osm"]["1_2"], "2026-11-03T00:00:00Z")
+            self.assertEqual(json.loads((d / "indoor_1_2.json").read_text())["osm_base"], "2026-11-03T00:00:00Z")
+        finally:
+            b.OUT, b.INDEX, b.fetch = old_out, old_index, old_fetch
+
     def test_index_round_trips_and_ignores_junk(self):
         d = pathlib.Path(tempfile.mkdtemp())
         old = b.INDEX

@@ -107,14 +107,13 @@ def fetch(row, col, not_before=None):
             time.sleep(5 * (attempt + 1))
     return None
 
-# When each cell was last fetched. Kept out of the cell files, so a cell whose map data hasn't
-# changed is not rewritten, so a refresh commits only the cells that changed plus this index.
-# Jekyll does not publish _data/.
+# When each cell was last fetched and tried, and the OpenStreetMap snapshot it was last confirmed
+# against. Jekyll does not publish _data/.
 INDEX = OUT.parent / "_data" / "indoor_fetched.json"
 
 def load_index():
     """{"fetched": {cell: time}, "tried": {cell: time}, "osm": {cell: snapshot}}; anything
-    unreadable counts as empty. "osm" is the OpenStreetMap snapshot time of the cell's data."""
+    unreadable counts as empty. "osm" is the snapshot the cell's data was last confirmed against."""
     try:
         raw = json.loads(INDEX.read_bytes())
     except (OSError, ValueError):
@@ -148,12 +147,6 @@ def save_index(index):
     INDEX.parent.mkdir(exist_ok=True)
     body = {name: dict(sorted(index.get(name, {}).items())) for name in ("fetched", "tried", "first_tried", "osm")}
     write_atomic(INDEX, (json.dumps(body, indent=0) + "\n").encode())
-
-def same_elements(path, elements):
-    try:
-        return json.loads(path.read_bytes()).get("elements") == elements
-    except (OSError, ValueError, AttributeError):
-        return False
 
 def write_atomic(path, body):
     """Write to a sibling and rename, so a failed write never leaves half a file to be committed."""
@@ -236,7 +229,8 @@ def slim(elements):
     return out
 
 def encode(elements, osm_base=None):
-    """The cell file. `osm_base` lets the web prefer the newest of two cells holding one station."""
+    """The cell file. `osm_base` is the snapshot it was last confirmed against, so the web can prefer
+    the more recently confirmed of two cells holding one station."""
     cell = {"elements": elements}
     if osm_base:
         cell["osm_base"] = osm_base
@@ -350,11 +344,15 @@ def run(wanted, index, now):
         elements = slim(check_answer(data))
         base = snapshot_of(data)
         # Empty cells are written too, so the app's lookup is a fast 200 instead of a slow Overpass call.
-        # A cell is rewritten only when its map data changed (keeping its old snapshot time otherwise).
-        if not same_elements(path, elements):
-            write_atomic(path, encode(elements, base))
-            if base:
-                index["osm"][key] = base
+        # The cell and the guard both carry the snapshot this answer confirmed, changed or not: a cell
+        # that stayed the same has still been checked against newer data than a neighbour that changed
+        # earlier, and no mirror older than this check may replace it. (So a refreshed cell is
+        # rewritten every 14 days even when its map data didn't change.)
+        body = encode(elements, base)
+        if not path.exists() or path.read_bytes() != body:
+            write_atomic(path, body)
+        if base:
+            index["osm"][key] = base
         index["fetched"][key] = int(time.time())
         written += 1
         if written % 25 == 0:
