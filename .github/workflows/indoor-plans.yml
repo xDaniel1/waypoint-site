@@ -52,7 +52,10 @@ jobs:
           if [ -d _data ]; then git add _data; fi
           # A temporary file left by a failed write is never published.
           git reset -q -- 'indoor/*.tmp' '_data/*.tmp' || true
-          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          if git diff --cached --quiet; then
+            # Nothing to push, but main may have moved: Publish must check what main is now.
+            echo "no changes"; git pull -q --ff-only origin main; exit 0
+          fi
           git commit -m "Refresh indoor plans $(date -u +%F)"
           # main may have moved during the hours of fetching; only this job writes indoor/ and the
           # index, so replaying the commit on top is safe.

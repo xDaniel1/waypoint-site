@@ -234,6 +234,32 @@ class Files(unittest.TestCase):
             b.urllib.request.urlopen = real
         self.assertEqual(b.snapshot_of(data), "2026-11-22T00:00:00Z")  # the lagging one was skipped
 
+    def test_a_stalled_replica_is_only_a_fallback(self):
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3 * DAY))
+        bodies = [json.dumps({"osm3s": {"timestamp_osm_base": old}, "elements": []}).encode(),
+                  json.dumps({"osm3s": {"timestamp_osm_base": now}, "elements": []}).encode()]
+        class Resp:
+            def __init__(self, body): self.parts = [body, b""]
+            def read(self, n): return self.parts.pop(0)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        real = b.urllib.request.urlopen
+        calls = iter(bodies)
+        b.urllib.request.urlopen = lambda *a, **k: Resp(next(calls))
+        try:
+            self.assertEqual(b.snapshot_of(b.fetch(1, 2)), now)  # skipped the stalled one
+            calls = iter([bodies[0]] * 6)
+            b.urllib.request.urlopen = lambda *a, **k: Resp(next(calls))
+            self.assertEqual(b.snapshot_of(b.fetch(1, 2)), old)  # all stalled: the newest of them
+        finally:
+            b.urllib.request.urlopen = real
+
+    def test_impossible_snapshots_are_ignored(self):
+        for v in ("9999-99-99T99:99:99Z", "2999-01-01T00:00:00Z", "2026-11-22 07:20:03", 5):
+            self.assertFalse(b.is_snapshot(v), v)
+        self.assertTrue(b.is_snapshot("2026-11-22T07:20:03Z"))
+
     def test_cell_carries_its_snapshot(self):
         self.assertEqual(json.loads(b.encode([], "2026-11-22T00:00:00Z")), {"elements": [], "osm_base": "2026-11-22T00:00:00Z"})
         self.assertIsNone(b.snapshot_of(b'{"elements":[]}'))

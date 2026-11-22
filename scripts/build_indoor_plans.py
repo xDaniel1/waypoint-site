@@ -9,7 +9,7 @@ looks after its bundle. Run nightly by .github/workflows/indoor-plans.yml.
 
 Environment: SUPABASE_URL, SUPABASE_ANON_KEY (the anon key is public by design; RLS only lets it read).
 """
-import json, math, os, pathlib, signal, sys, time, urllib.parse, urllib.request
+import datetime, json, math, os, pathlib, signal, sys, time, urllib.parse, urllib.request
 
 CELL, MARGIN = 0.006, 0.002
 OUT = pathlib.Path(__file__).resolve().parent.parent / "indoor"
@@ -80,14 +80,22 @@ class hard_limit:
         signal.signal(signal.SIGALRM, self.old)
         return False
 
+CURRENT = 86400  # a replica more than a day behind is stalled; ask the others first
+
 def fetch(row, col, not_before=None):
     """The cell's Overpass answer, or None when every server failed. Raises BudgetSpent if there was
-    no time for the next request, so the cell is not counted as tried."""
+    no time for the next request and nothing usable came back, so the cell is not counted as tried.
+
+    An answer from a replica more than a day behind is kept only as a fallback while the other
+    servers are asked: a stalled replica would otherwise mark old data fresh for 14 days."""
     body = urllib.parse.urlencode({"data": query(row, col)}).encode()
+    fallback, fallback_base = None, ""
     for attempt in range(2):
         for endpoint in ENDPOINTS:
             # No new request that could run past the budget; the cell is retried next run.
             if time_left() < REQUEST_TIMEOUT:
+                if fallback:
+                    return fallback
                 # Out of time, not a failed cell: it keeps its place for the next run.
                 raise BudgetSpent()
             try:
@@ -100,9 +108,18 @@ def fetch(row, col, not_before=None):
                     # A mirror lagging behind the snapshot we already published would roll the cell back.
                     if not_before and (not base or base < not_before):
                         raise ValueError(f"older snapshot ({base} < {not_before})")
-                return data
+                age = snapshot_age(base)
+                if age is not None and age <= CURRENT:
+                    return data
+                print(f"  {endpoint.split('/')[2]}: replica behind ({base}); asking the others", file=sys.stderr)
+                if base and base > fallback_base:
+                    fallback, fallback_base = data, base
+                elif not fallback:
+                    fallback = data
             except Exception as error:
                 print(f"  {endpoint.split('/')[2]}: {error}", file=sys.stderr)
+        if fallback:
+            return fallback  # every server asked; the most recent of the lagging answers
         if time_left() > REQUEST_TIMEOUT + 10:
             time.sleep(5 * (attempt + 1))
     return None
@@ -127,9 +144,24 @@ def load_index():
     osm = {k: v for k, v in osm.items() if is_snapshot(v)} if isinstance(osm, dict) else {}
     return {"fetched": times("fetched"), "tried": times("tried"), "first_tried": times("first_tried"), "osm": osm}
 
+def parse_snapshot(v):
+    """The time of an Overpass timestamp_osm_base such as 2026-11-22T07:20:03Z, or None."""
+    if not (isinstance(v, str) and len(v) == 20):
+        return None
+    try:
+        return datetime.datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+
 def is_snapshot(v):
-    """An Overpass timestamp_osm_base such as 2026-11-22T07:20:03Z (compares as text)."""
-    return isinstance(v, str) and len(v) == 20 and v[4] == "-" and v[10] == "T" and v.endswith("Z")
+    """A real snapshot time, not in the future (an impossible one would block every later answer).
+    In this fixed format it compares correctly as text."""
+    t = parse_snapshot(v)
+    return t is not None and t.timestamp() <= time.time() + 3600
+
+def snapshot_age(v):
+    t = parse_snapshot(v)
+    return None if t is None else time.time() - t.timestamp()
 
 def snapshot_of(data):
     """The OpenStreetMap snapshot an Overpass answer was made from, or None."""
