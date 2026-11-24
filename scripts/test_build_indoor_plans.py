@@ -19,11 +19,16 @@ class Freshness(unittest.TestCase):
 
     def test_recent_cell_from_current_query_is_fresh(self):
         rel = {"type": "relation", "members": [{"role": "outer", "geometry": [{"lat": 0, "lon": 0}, {"lat": 0, "lon": 1}]}]}
-        path = self.cell({"elements": [rel, {"type": "way"}]})
+        path = self.cell({"landside": True, "elements": [rel, {"type": "way"}]})
         self.assertTrue(b.is_fresh(path, self.now - DAY, self.now))
 
     def test_empty_cell_is_fresh(self):
-        self.assertTrue(b.is_fresh(self.cell({"elements": []}), self.now - DAY, self.now))
+        self.assertTrue(b.is_fresh(self.cell({"landside": True, "elements": []}), self.now - DAY, self.now))
+
+    def test_cell_without_the_landside_flag_is_from_the_old_query(self):
+        # Before the app's query (landside, repeat_on, lifts, shop=mall): rebuilt however recent.
+        self.assertFalse(b.is_fresh(self.cell({"elements": []}), self.now - DAY, self.now))
+        self.assertFalse(b.is_fresh(self.cell({"landside": "yes", "elements": []}), self.now - DAY, self.now))
 
     def test_old_or_unknown_fetch_time_is_stale(self):
         path = self.cell({"elements": []})
@@ -274,7 +279,8 @@ class Files(unittest.TestCase):
         self.assertTrue(b.is_snapshot("2026-11-22T07:20:03Z"))
 
     def test_cell_carries_its_snapshot(self):
-        self.assertEqual(json.loads(b.encode([], "2026-11-22T00:00:00Z")), {"elements": [], "osm_base": "2026-11-22T00:00:00Z"})
+        self.assertEqual(json.loads(b.encode([], "2026-11-22T00:00:00Z")),
+                         {"landside": True, "generator": b.GENERATOR, "elements": [], "osm_base": "2026-11-22T00:00:00Z"})
         self.assertIsNone(b.snapshot_of(b'{"elements":[]}'))
 
     def test_a_confirmed_cell_refuses_an_older_mirror(self):
@@ -312,6 +318,48 @@ class Files(unittest.TestCase):
             self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "first_tried": {}, "osm": {}})
         finally:
             b.INDEX = old
+
+
+class AppFormat(unittest.TestCase):
+    """The CDN cell is the app bundle's format: same query, same trimming, same fixes."""
+
+    def test_query_is_the_apps(self):
+        q = b.query(6792, -12329)
+        for clause in ("nwr[repeat_on][shop]", "node[highway=elevator][level]", "way[shop=mall]", "rel[shop=mall]",
+                       "nwr[aeroway=passenger_pickup]", "nwr[railway=station]", "out body geom"):
+            self.assertIn(clause, q)
+        self.assertIn("[timeout:60]", q)
+
+    def test_trim_keeps_what_the_apps_read(self):
+        s, w, n, e = b.fv.cell_box(1, 2)
+        lat, lon = (s + n) / 2, (w + e) / 2
+        shop = {"type": "node", "id": 1, "lat": lat + 1e-9, "lon": lon, "tags": {"shop": "gift", "level": "1", "name": "A", "phone": "+1"}}
+        bench = {"type": "node", "id": 2, "lat": lat, "lon": lon, "tags": {"amenity": "bench", "level": "1"}}
+        away = {"type": "node", "id": 3, "lat": n + 1, "lon": lon, "tags": {"shop": "gift", "level": "1"}}
+        unfloored = {"type": "node", "id": 4, "lat": lat, "lon": lon, "tags": {"shop": "gift", "name": "B"}}
+        kept = b.trim([shop, bench, away, unfloored], 1, 2)
+        self.assertEqual(kept, [{"type": "node", "id": 1, "tags": {"shop": "gift", "level": "1", "name": "A"},
+                                 "lat": round(lat, 6), "lon": round(lon, 6)}])
+
+    def test_enrich_floors_gates_and_leaves_the_index_alone(self):
+        d = pathlib.Path(tempfile.mkdtemp())
+        old_out = b.OUT
+        try:
+            b.OUT = d / "indoor"
+            b.OUT.mkdir()
+            venue = {"short_name": "XYZ", "latitude": 0.003, "longitude": 0.003, "radius_m": 200, "kind": "airport"}
+            gates = [{"type": "node", "id": i, "lat": 0.003, "lon": 0.001 + i * 0.0003,
+                      "tags": {"aeroway": "gate", "ref": f"G{i}", **({"level": "1"} if i != 3 else {})}} for i in range(1, 6)]
+            (b.OUT / "indoor_0_0.json").write_bytes(b.encode(gates, "2026-11-22T00:00:00Z"))
+            (b.OUT / "indoor_0_1.json").write_bytes(json.dumps({"elements": [dict(gates[2])]}).encode())  # old format
+            self.assertEqual(b.enrich([venue], overture=False), 1)
+            cell = json.loads((b.OUT / "indoor_0_0.json").read_bytes())
+            self.assertEqual(cell["elements"][2]["tags"], {"aeroway": "gate", "ref": "G3", "level": "1", "level:inferred": "gates"})
+            self.assertEqual(cell["osm_base"], "2026-11-22T00:00:00Z")
+            self.assertNotIn("level", json.loads((b.OUT / "indoor_0_1.json").read_bytes())["elements"][0]["tags"])
+            self.assertEqual(b.enrich([venue], overture=False), 0, "a second pass changes nothing")
+        finally:
+            b.OUT = old_out
 
 
 if __name__ == "__main__":

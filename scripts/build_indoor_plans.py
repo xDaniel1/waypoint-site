@@ -2,14 +2,27 @@
 """Pre-builds OpenStreetMap indoor plans for every venue in Waypoint's `venues` table.
 
 Reads the table over Supabase's public REST endpoint, covers each venue's radius with the app's
-0.006-degree map cells, runs the same Overpass query the app runs, and writes one JSON file per
+0.006-degree map cells, runs the same Overpass query the app runs (its airport form, with the
+landside clauses), trims each answer the way the app's bundle is trimmed, and writes one JSON file per
 cell into indoor/ — which GitHub Pages serves at
 https://xdaniel1.github.io/waypoint-site/indoor/indoor_<row>_<col>.json, the first place the app
 looks after its bundle. Run nightly by .github/workflows/indoor-plans.yml.
 
+Then every venue's cells get the app bundle's two fixes (scripts/kova_indoor/indoor_enrich.py):
+gates with no floor take the one their neighbouring gates agree on, and unnamed shop units are
+named from Overture Maps Places (permissive licences only; needs `duckdb`, else names are left).
+
+scripts/kova_indoor/ is a verbatim copy of the iOS repo's Scripts/fetch_indoor_venues.py,
+indoor_inventory.py and indoor_enrich.py (query, trimming, enrichment): copy them again when
+those change, so the CDN and the bundle stay one format.
+
 Environment: SUPABASE_URL, SUPABASE_ANON_KEY (the anon key is public by design; RLS only lets it read).
 """
 import datetime, json, math, os, pathlib, signal, sys, time, urllib.parse, urllib.request
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "kova_indoor"))
+import fetch_indoor_venues as fv  # noqa: E402  (query, trimming: the iOS bundle's)
+import indoor_enrich  # noqa: E402
 
 CELL, MARGIN = 0.006, 0.002
 OUT = pathlib.Path(__file__).resolve().parent.parent / "indoor"
@@ -22,7 +35,7 @@ BUDGET_SECONDS = float(os.environ.get("INDOOR_BUDGET_MIN", "240")) * 60
 STARTED = time.time()
 
 def venues():
-    url = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1/venues?select=short_name,latitude,longitude,radius_m,sources&enabled=eq.true"
+    url = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1/venues?select=short_name,latitude,longitude,radius_m,sources,kind&enabled=eq.true"
     key = os.environ["SUPABASE_ANON_KEY"]
     req = urllib.request.Request(url, headers={"apikey": key, "Authorization": f"Bearer {key}"})
     with hard_limit(60):  # a hung startup must not eat the night's budget
@@ -36,13 +49,21 @@ def cells_for(lat, lon, radius_m):
     return {(r, c) for r in rows for c in cols}
 
 def query(row, col):
-    s, w = row * CELL - MARGIN, col * CELL - MARGIN
-    box = f"{s},{w},{s + CELL + 2 * MARGIN},{w + CELL + 2 * MARGIN}"
-    return (f"[out:json][timeout:60];(way[indoor]({box});way[level][shop]({box});way[level][amenity]({box});"
-            f"way[highway=steps][level]({box});way[aeroway=gate]({box});"
-            f"node[shop][level]({box});node[amenity][level]({box});node[aeroway=gate]({box});"
-            f"way[aeroway=terminal]({box});way[building=train_station]({box});way[building=transportation]({box});"
-            f"rel[aeroway=terminal]({box});rel[building=train_station]({box});rel[building=transportation]({box}););out body geom;")
+    """The app's query (IndoorMapService.overpassQuery, airport form) for the cell's box."""
+    return fv.query(fv.cell_box(row, col), timeout=60)
+
+# Written into every cell this publisher builds: the cell answers the airport (landside) query, so
+# the app doesn't ask Overpass for its garages again, and it is in the current format (a cell
+# without it came from the old query and is rebuilt).
+GENERATOR = "waypoint-site scripts/build_indoor_plans.py"
+
+def trim(elements, row, col):
+    """The cell as the app's bundle keeps it (fetch_indoor_venues.write): only the tags the apps
+    read, no clutter, coordinates to 6 decimals, elements touching the cell's box, outlines first."""
+    box = fv.cell_box(row, col)
+    kept = [c for c in (fv.compact(e) for e in elements) if c and fv.touches(c, box)]
+    kept.sort(key=lambda c: ({"relation": 0, "way": 1, "node": 2}[c["type"]], c["id"]))
+    return kept
 
 REQUEST_TIMEOUT = 75
 
@@ -263,10 +284,10 @@ def slim(elements):
 def encode(elements, osm_base=None):
     """The cell file. `osm_base` is the snapshot it was last confirmed against, so the web can prefer
     the more recently confirmed of two cells holding one station."""
-    cell = {"elements": elements}
+    cell = {"landside": True, "generator": GENERATOR, "elements": elements}
     if osm_base:
         cell["osm_base"] = osm_base
-    return json.dumps(cell, separators=(",", ":"), allow_nan=False).encode()
+    return json.dumps(cell, separators=(",", ":"), allow_nan=False, ensure_ascii=False).encode()
 
 def is_fresh(path, fetched, now):
     """A cell is fresh if the index says it was fetched under MAX_AGE_DAYS ago and its file is a
@@ -282,6 +303,9 @@ def is_fresh(path, fetched, now):
     except (OSError, ValueError):
         return False
     if not isinstance(cell, dict) or not isinstance(cell.get("elements"), list):
+        return False
+    # Built by the old query (no landside, repeat_on, lift or shop=mall clauses): rebuild it.
+    if cell.get("landside") is not True:
         return False
     return all(has_members(e) for e in cell["elements"])
 
@@ -333,19 +357,98 @@ def has_members(element):
 
 def main():
     OUT.mkdir(exist_ok=True)
-    wanted = {}
+    wanted, listed = {}, []
     for venue in venues():
         if "osm" not in (venue.get("sources") or ["osm"]):
             continue
+        listed.append(venue)
         for cell in cells_for(venue["latitude"], venue["longitude"], venue["radius_m"]):
             wanted.setdefault(cell, []).append(venue["short_name"])
     print(f"{len(wanted)} cells across {len(set(sum(wanted.values(), [])))} venues")
     now = time.time()
     index = load_index()
     try:
-        return run(wanted, index, now)
+        status = run(wanted, index, now)
     finally:
         save_index(index)
+    enrich(listed)
+    return status
+
+# --- the bundle's fixes, per venue ---------------------------------------------------------
+
+# Overture answers per venue, so a nightly run asks S3 again only for a new release or a moved
+# venue. Jekyll does not publish _data/.
+OVERTURE_CACHE = OUT.parent / "_data" / "overture_places.json"
+
+def venue_box(venue):
+    lat, lon, r = venue["latitude"], venue["longitude"], venue["radius_m"]
+    dlat, dlon = r / 111_320, r / (111_320 * math.cos(math.radians(lat)))
+    return [round(lat - dlat, 6), round(lon - dlon, 6), round(lat + dlat, 6), round(lon + dlon, 6)]
+
+def load_json(path):
+    try:
+        data = json.loads(path.read_bytes())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def overture_for(venue, cache, release):
+    """The venue's Overture rows: cached for this release and box, else fetched. On a failed fetch
+    the last cached rows (any release) are used; with none, None (names left as they are)."""
+    name, box = venue["short_name"], venue_box(venue)
+    hit = cache.get(name)
+    if isinstance(hit, dict) and hit.get("release") == release and hit.get("box") == box:
+        return [tuple(r) for r in hit.get("places", [])]
+    try:
+        rows = indoor_enrich.overture_places(tuple(box))
+    except Exception as error:  # no duckdb, S3 down, the release withdrawn
+        print(f"::warning::Overture places for {name}: {str(error)[:160]}")
+        return [tuple(r) for r in hit["places"]] if isinstance(hit, dict) and isinstance(hit.get("places"), list) else None
+    cache[name] = {"release": release, "box": box, "places": [list(r) for r in rows]}
+    return rows
+
+def enrich(listed, overture=None):
+    """Gate floors and Overture names over every listed venue's cells on disk, written back only
+    when they change. A failure here never fails the run: the cells are still valid without it."""
+    overture = os.environ.get("INDOOR_OVERTURE", "1") != "0" if overture is None else overture
+    cache = load_json(OVERTURE_CACHE) if overture else {}
+    release = indoor_enrich.OVERTURE_RELEASE
+    changed = 0
+    for venue in listed:
+        try:
+            lat, lon, r = venue["latitude"], venue["longitude"], venue["radius_m"]
+            data = {}
+            for row, col in sorted(cells_for(lat, lon, r)):
+                path = OUT / f"indoor_{row}_{col}.json"
+                cell = load_json(path)
+                if isinstance(cell.get("elements"), list) and cell.get("landside") is True:
+                    data[(row, col)] = cell  # only cells in the current format
+            if not data:
+                continue
+            places = overture_for(venue, cache, release) if overture else None
+            within = lambda la, lo, c=(lat, lon), r=r: indoor_enrich.metres(c, (la, lo)) <= r
+            before = {rc: encode(d["elements"], d.get("osm_base")) for rc, d in data.items()}
+            gates, suspect, names = indoor_enrich.enrich_cells(data, venue["short_name"], venue.get("kind") == "airport",
+                                                               places, within)
+            for rc, d in data.items():
+                body = encode(d["elements"], d.get("osm_base"))
+                if body != before[rc]:
+                    write_atomic(OUT / f"indoor_{rc[0]}_{rc[1]}.json", body)
+                    changed += 1
+            if gates or names:
+                print(f"{venue['short_name']}: {len(gates)} gates floored from neighbours, {len(names)} units named from Overture")
+            for gid, label, f, v in suspect:
+                print(f"  {venue['short_name']}: gate {label or gid} (node {gid}) is on {f}, every neighbour on {v}")
+        except Exception as error:
+            print(f"::warning::enriching {venue.get('short_name')}: {str(error)[:160]}")
+    if overture:
+        try:
+            OVERTURE_CACHE.parent.mkdir(exist_ok=True)
+            write_atomic(OVERTURE_CACHE, json.dumps(cache, sort_keys=True, ensure_ascii=False).encode())
+        except OSError as error:
+            print(f"::warning::Overture cache not saved: {error}")
+    print(f"enriched: {changed} cells changed")
+    return changed
 
 def run(wanted, index, now):
     written = skipped = failed = 0
@@ -373,7 +476,7 @@ def run(wanted, index, now):
             failed += 1
             print(f"failed {row},{col} ({', '.join(names)})")
             continue
-        elements = slim(check_answer(data))
+        elements = trim(slim(check_answer(data)), row, col)
         base = snapshot_of(data)
         # Empty cells are written too, so the app's lookup is a fast 200 instead of a slow Overpass call.
         # The cell and the guard both carry the snapshot this answer confirmed, changed or not: a cell
