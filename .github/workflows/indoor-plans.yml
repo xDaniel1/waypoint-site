@@ -2,6 +2,9 @@ name: Build indoor plans
 
 # Pre-builds OpenStreetMap floor plans for every venue in Waypoint's venues table and publishes
 # them with the site, so the app loads a terminal from the CDN instead of the public Overpass servers.
+# The cells are the app bundle's format (scripts/kova_indoor/, copied from the iOS repo): the app's
+# query with its landside clauses, the same trimming, gates floored from their neighbours and unnamed
+# shop units named from Overture Maps Places. Cells from the old query are rebuilt as they come due.
 on:
   schedule:
     - cron: "17 7 * * *"   # nightly, 07:17 UTC
@@ -35,10 +38,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install duckdb (Overture places)
+        # Only the Overture names need it; without it the run still publishes, with a warning.
+        run: python3 -m pip install --quiet "duckdb==2.0.1" || echo "::warning::duckdb not installed; Overture names skipped"
       - name: Test the publisher
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 -m unittest discover -s scripts/kova_indoor -p 'test_*.py'
       - name: Fetch plans
         env:
+          # Overture release for the shop names; set the repo variable when the pinned one is withdrawn.
+          OVERTURE_RELEASE: ${{ vars.OVERTURE_RELEASE }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: python3 scripts/build_indoor_plans.py ${{ inputs.refresh && '--refresh' || '' }}
