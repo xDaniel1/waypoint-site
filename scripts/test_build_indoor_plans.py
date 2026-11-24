@@ -362,5 +362,256 @@ class AppFormat(unittest.TestCase):
             b.OUT = old_out
 
 
+class BundleFixes(unittest.TestCase):
+    """enrich(): the iOS bundle's enrich and prune over the CDN cells, with Overture cached."""
+
+    def setUp(self):
+        import contextlib, io
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.old = (b.OUT, b.OVERTURE_CACHE, b.indoor_enrich.overture_places)
+        b.OUT, b.OVERTURE_CACHE = self.dir / "indoor", self.dir / "_data" / "overture_places.json"
+        b.OUT.mkdir()
+        self.mall = {"short_name": "M", "latitude": 0.003, "longitude": 0.003, "radius_m": 200, "kind": "mall"}
+        self.quiet = contextlib.redirect_stdout(io.StringIO())
+        self.quiet.__enter__()
+
+    def tearDown(self):
+        self.quiet.__exit__(None, None, None)
+        b.OUT, b.OVERTURE_CACHE, b.indoor_enrich.overture_places = self.old
+
+    def write(self, elements):
+        (b.OUT / "indoor_0_0.json").write_bytes(b.encode(elements, "2026-11-22T00:00:00Z"))
+
+    def read(self):
+        return json.loads((b.OUT / "indoor_0_0.json").read_bytes())
+
+    def room(self, i, level, **tags):
+        lat, lon = 0.003, 0.001 + i * 0.0003
+        g = [{"lat": lat, "lon": lon}, {"lat": lat, "lon": lon + 1e-4}, {"lat": lat + 1e-4, "lon": lon + 1e-4}, {"lat": lat, "lon": lon}]
+        return {"type": "way", "id": i, "geometry": g, "tags": {"indoor": "room", "level": level, **tags}}
+
+    def test_a_floor_with_no_named_place_is_taken_off(self):
+        shop = {"type": "node", "id": 1, "lat": 0.003, "lon": 0.003, "tags": {"shop": "gift", "name": "A", "level": "0"}}
+        self.write([self.room(2, "1"), shop])
+        b.indoor_enrich.overture_places = lambda box, path=None: []
+        self.assertEqual(b.enrich([self.mall], overture=False), 0, "without tonight's Overture names: not pruned")
+        self.assertEqual(b.enrich([self.mall], overture=True), 1)
+        cell = self.read()
+        self.assertEqual([e["id"] for e in cell["elements"]], [1], "the unnamed room on 1 goes; the named shop on 0 stays")
+        self.assertEqual(cell["osm_base"], "2026-11-22T00:00:00Z")
+        self.assertEqual(b.enrich([self.mall], overture=True), 0, "a second pass changes nothing")
+
+    def test_overture_rows_are_cached_by_release_shape_and_box(self):
+        calls = []
+        def fetch(box, path=None):
+            calls.append(box)
+            return [("g1", "PIQ", "gift_shop", 0.003, 0.003, "Level 2")]
+        box = (0.0, 0.0, 0.006, 0.006)
+        cache = {b.box_key(box): {"release": "r1", "box": list(box), "places": [["g0", "Old", "gift_shop", 0.0, 0.0]]}}  # no schema
+        places = b.cached_places(cache, "r1", fetch)
+        self.assertEqual(places(box), [("g1", "PIQ", "gift_shop", 0.003, 0.003, "Level 2")])
+        self.assertEqual(len(calls), 1, "rows cached without the schema (no address) are fetched again")
+        self.assertEqual(cache[b.box_key(box)]["schema"], b.OVERTURE_SCHEMA)
+        self.assertEqual(places(box), [("g1", "PIQ", "gift_shop", 0.003, 0.003, "Level 2")])
+        self.assertEqual(len(calls), 1, "same release, shape and box: from the cache")
+        b.cached_places(cache, "r2", fetch)(box)
+        self.assertEqual(len(calls), 2, "a new release is fetched")
+
+    def test_failed_fetch_uses_another_release_in_the_current_shape_only(self):
+        def down(box, path=None):
+            raise OSError("S3 down")
+        box = (0.0, 0.0, 0.006, 0.006)
+        rows = [["g1", "PIQ", "gift_shop", 0.003, 0.003, None]]
+        cache = {b.box_key(box): {"release": "r1", "schema": b.OVERTURE_SCHEMA, "box": list(box), "places": rows}}
+        self.assertEqual(b.cached_places(cache, "r2", down)(box), [tuple(rows[0])])
+        cache[b.box_key(box)].pop("schema")
+        with self.assertRaises(b.OvertureMissing):
+            b.cached_places(cache, "r2", down)(box)
+
+    def test_without_overture_names_and_points_stay(self):
+        def down(box, path=None):
+            raise OSError("no duckdb")
+        b.indoor_enrich.overture_places = down
+        named = self.room(2, "0", shop="gift", name="PIQ", **{"name:source": "overture", "ref:overture": "g1"})
+        point = {"type": "node", "id": -5, "lat": 0.003, "lon": 0.004,
+                 "tags": {"name": "Lush", "shop": "gift", "level": "0", "level:source": "address", "name:source": "overture", "ref:overture": "g2"}}
+        self.write([named, point])
+        self.assertEqual(b.enrich([self.mall], overture=True), 0)
+        self.assertEqual([e["tags"]["name"] for e in self.read()["elements"]], ["PIQ", "Lush"],
+                         "an earlier run's Overture name and store point are kept")
+        self.assertEqual(json.loads(b.OVERTURE_CACHE.read_bytes()), {}, "nothing cached")
+
+    def test_one_venues_failed_fetch_leaves_the_others_their_overture(self):
+        # Mall M (cell 0,0) gets its places; mall F, far away in its own cells, can't: F keeps
+        # its old name, M gets its store point, and M's rows are cached.
+        self.mall["radius_m"] = 300  # takes in the mapped shops that settle the floor numbering
+        far = dict(self.mall, short_name="F", latitude=1.003, longitude=1.003)
+        frc = b.fv.cell(1.003, 1.003)
+        old_name = self.room(2, "0", shop="gift", name="Old", **{"name:source": "overture", "ref:overture": "g9"})
+        old_name["geometry"] = [{"lat": p["lat"] + 1, "lon": p["lon"] + 1} for p in old_name["geometry"]]
+        (b.OUT / f"indoor_{frc[0]}_{frc[1]}.json").write_bytes(b.encode([old_name], None))
+        mall = {"type": "way", "id": 50, "tags": {"shop": "mall", "building:levels": "2"},
+                "geometry": [{"lat": 0.0005, "lon": 0.0005}, {"lat": 0.0005, "lon": 0.0055}, {"lat": 0.0055, "lon": 0.0055},
+                             {"lat": 0.0055, "lon": 0.0005}, {"lat": 0.0005, "lon": 0.0005}]}
+        shops = [{"type": "node", "id": i, "lat": 0.001, "lon": 0.001 * i, "tags": {"shop": "gift", "name": f"S{i}", "level": lv}}
+                 for i, lv in ((1, "1"), (2, "2"))]
+        self.write([mall] + shops)
+        def fetch(box, path=None):
+            if box[0] > 0.5:
+                raise OSError("S3 timed out")
+            return [("g1", "PIQ", "gift_shop", 0.003, 0.003, "2nd Floor")]
+        b.indoor_enrich.overture_places = fetch
+        b.enrich([far, self.mall], overture=True)
+        self.assertEqual([(e["tags"]["name"], e["tags"]["level"]) for e in self.read()["elements"] if e["tags"].get("level:source")],
+                         [("PIQ", "2")])
+        far_cell = json.loads((b.OUT / f"indoor_{frc[0]}_{frc[1]}.json").read_bytes())
+        self.assertEqual(far_cell["elements"][0]["tags"]["name"], "Old")
+        self.assertEqual(list(json.loads(b.OVERTURE_CACHE.read_bytes())), [b.box_key(b.venue_box(self.mall))])
+
+    def test_a_venue_without_tonights_overture_is_not_pruned(self):
+        def down(box, path=None):
+            raise OSError("S3 down")
+        b.indoor_enrich.overture_places = down
+        shop = {"type": "node", "id": 1, "lat": 0.003, "lon": 0.003, "tags": {"shop": "gift", "name": "A", "level": "0"}}
+        self.write([self.room(2, "1"), shop])
+        self.assertEqual(b.enrich([self.mall], overture=True), 0, "floor 1 may be named by Overture: kept for now")
+        b.indoor_enrich.overture_places = lambda box, path=None: []
+        self.assertEqual(b.enrich([self.mall], overture=True), 1, "pruned once tonight's places are had")
+
+    def test_a_failed_enrich_with_overture_prunes_nothing(self):
+        b.indoor_enrich.overture_places = lambda box, path=None: []
+        broken = b.indoor_enrich.enrich
+        def boom(*a, **k):
+            raise RuntimeError("bug")
+        b.indoor_enrich.enrich = boom
+        try:
+            shop = {"type": "node", "id": 1, "lat": 0.003, "lon": 0.003, "tags": {"shop": "gift", "name": "A", "level": "0"}}
+            self.write([self.room(2, "1"), shop])
+            self.assertEqual(b.enrich([self.mall], overture=True), 0, "floor 1 may be named by Overture: kept")
+        finally:
+            b.indoor_enrich.enrich = broken
+
+    def test_no_box_is_fetched_past_the_deadline(self):
+        calls = []
+        old = b.STARTED
+        try:
+            b.STARTED = time.time() - b.OVERTURE_DEADLINE - 1
+            with self.assertRaises(b.OvertureMissing):
+                b.cached_places({}, "r1", lambda box, path=None: calls.append(box) or [])((0.0, 0.0, 0.006, 0.006))
+        finally:
+            b.STARTED = old
+        self.assertEqual(calls, [])
+
+    def test_a_venue_sharing_cells_with_one_not_yet_rebuilt_is_not_pruned(self):
+        # M's only cell is rebuilt; W shares it and has an old-format cell. A room in both, on a
+        # floor W's old cell may name, keeps that floor.
+        b.indoor_enrich.overture_places = lambda box, path=None: []
+        wide = dict(self.mall, short_name="W", latitude=0.003, longitude=0.0045, radius_m=300)
+        shop = {"type": "node", "id": 1, "lat": 0.003, "lon": 0.003, "tags": {"shop": "gift", "name": "A", "level": "0"}}
+        self.write([self.room(8, "1"), shop])
+        (b.OUT / "indoor_0_1.json").write_bytes(json.dumps({"elements": []}).encode())  # old format
+        self.assertEqual(b.enrich([self.mall, wide], overture=True), 0)
+        (b.OUT / "indoor_0_1.json").write_bytes(b.encode([], None))
+        self.assertEqual(b.enrich([self.mall, wide], overture=True), 1, "pruned once the group's cells are all rebuilt")
+
+    def test_a_real_cancel_is_not_taken_for_the_time_limit(self):
+        def interrupted(box, path=None):
+            raise KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            b.cached_places({}, "r1", interrupted)((0.0, 0.0, 0.006, 0.006))
+
+    def test_the_time_limit_is_a_missing_box(self):
+        old = b.OVERTURE_FETCH_LIMIT
+        b.OVERTURE_FETCH_LIMIT = 1.2
+        def slow(box, path=None):
+            time.sleep(5)
+        try:
+            with self.assertRaises(b.OvertureMissing):
+                b.cached_places({}, "r1", slow)((0.0, 0.0, 0.006, 0.006))
+        finally:
+            b.OVERTURE_FETCH_LIMIT = old
+
+    def test_a_venue_with_a_cell_not_yet_rebuilt_is_not_pruned(self):
+        b.indoor_enrich.overture_places = lambda box, path=None: []
+        wide = dict(self.mall, latitude=0.003, longitude=0.0045, radius_m=300)  # cells (0, 0) and (0, 1)
+        self.assertEqual(sorted(b.cells_for(0.003, 0.0045, 300)), [(0, 0), (0, 1)])
+        shop = {"type": "node", "id": 1, "lat": 0.003, "lon": 0.003, "tags": {"shop": "gift", "name": "A", "level": "0"}}
+        self.write([self.room(8, "1"), shop])
+        (b.OUT / "indoor_0_1.json").write_bytes(json.dumps({"elements": []}).encode())  # old format
+        self.assertEqual(b.enrich([wide], overture=True), 0, "floor 1 may be named in the old cell: kept")
+        (b.OUT / "indoor_0_1.json").write_bytes(b.encode([], None))
+        self.assertEqual(b.enrich([wide], overture=True), 1, "pruned once every cell is rebuilt")
+
+    def test_each_box_is_asked_once_a_run(self):
+        calls = []
+        def down(box, path=None):
+            calls.append(box)
+            raise OSError("S3 down")
+        box = (0.0, 0.0, 0.006, 0.006)
+        rows = [["g1", "PIQ", "gift_shop", 0.003, 0.003, None]]
+        cache = {b.box_key(box): {"release": "r1", "schema": b.OVERTURE_SCHEMA, "box": list(box), "places": rows}}
+        places = b.cached_places(cache, "r2", down)
+        self.assertEqual(places(box), places(box))
+        other = (1.0, 1.0, 1.006, 1.006)
+        for _ in range(2):
+            with self.assertRaises(b.OvertureMissing):
+                places(other)
+        self.assertEqual(len(calls), 2)
+
+    def test_venues_sharing_a_cell_are_grouped(self):
+        areas = {"A": ("mall", None, [(0, 0), (0, 1)], None), "B": ("mall", None, [(0, 1), (0, 2)], None),
+                 "C": ("mall", None, [(5, 5)], None), "D": ("mall", None, [(0, 2)], None)}
+        self.assertEqual(sorted(map(sorted, b.sharing_groups(areas))), [["A", "B", "D"], ["C"]])
+
+    def test_a_failed_enrich_prunes_nothing_and_restores_the_patches(self):
+        b.indoor_enrich.overture_places = lambda box, path=None: []
+        saved = {k: getattr(b.indoor_enrich, k) for k in ("areas", "load", "save", "overture_places")}
+        broken = b.indoor_enrich.enrich
+        def boom(*a, **k):
+            raise RuntimeError("bug")
+        b.indoor_enrich.enrich = boom
+        try:
+            shop = {"type": "node", "id": 1, "lat": 0.003, "lon": 0.003, "tags": {"shop": "gift", "name": "A", "level": "0"}}
+            self.write([self.room(2, "1"), shop])
+            self.assertEqual(b.enrich([self.mall], overture=True), 0, "nothing pruned after a failed enrich")
+        finally:
+            b.indoor_enrich.enrich = broken
+        self.assertEqual({k: getattr(b.indoor_enrich, k) for k in saved}, saved)
+
+    def test_store_points_come_from_one_run_over_every_venue(self):
+        # Two malls sharing the cell, each finding the same Overture place: one point, not two,
+        # and neither run strips the other's.
+        mall = {"type": "way", "id": 50, "tags": {"shop": "mall", "building:levels": "2"},
+                "geometry": [{"lat": 0.0005, "lon": 0.0005}, {"lat": 0.0005, "lon": 0.0055}, {"lat": 0.0055, "lon": 0.0055},
+                             {"lat": 0.0055, "lon": 0.0005}, {"lat": 0.0005, "lon": 0.0005}]}
+        shops = [{"type": "node", "id": i, "lat": 0.001, "lon": 0.001 * i, "tags": {"shop": "gift", "name": f"S{i}", "level": lv}}
+                 for i, lv in ((1, "1"), (2, "2"))]
+        self.write([mall] + shops)
+        b.indoor_enrich.overture_places = lambda box, path=None: [("g1", "PIQ", "gift_shop", 0.003, 0.003, "2nd Floor")]
+        other = dict(self.mall, short_name="N", radius_m=250)
+        b.enrich([self.mall, other], overture=True)
+        points = [e for e in self.read()["elements"] if e["tags"].get("level:source")]
+        self.assertEqual([(e["tags"]["name"], e["tags"]["level"]) for e in points], [("PIQ", "2")])
+        self.assertEqual(b.enrich([self.mall, other], overture=True), 0, "a second run changes nothing")
+
+    def test_run_records_the_floors_of_a_gates_ways(self):
+        s, w, n, e = b.fv.cell_box(1, 2)
+        lat, lon = (s + n) / 2, (w + e) / 2
+        gate = {"type": "node", "id": 7, "lat": lat, "lon": lon, "tags": {"aeroway": "gate", "ref": "A1"}}
+        hall = {"type": "way", "id": 8, "nodes": [6, 7], "tags": {"indoor": "corridor", "level": "2"},
+                "geometry": [{"lat": lat, "lon": lon - 1e-4}, {"lat": lat, "lon": lon}]}
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        old_index, old_fetch = b.INDEX, b.fetch
+        try:
+            b.INDEX = self.dir / "_data" / "i.json"
+            b.fetch = lambda row, col, not_before=None: json.dumps({"osm3s": {"timestamp_osm_base": now}, "elements": [gate, hall]}).encode()
+            b.run({(1, 2): ["X"]}, b.load_index(), time.time())
+        finally:
+            b.INDEX, b.fetch = old_index, old_fetch
+        cell = json.loads((b.OUT / "indoor_1_2.json").read_bytes())
+        self.assertEqual([x["tags"].get("level:ways") for x in cell["elements"] if x["type"] == "node"], ["2"])
+        self.assertTrue(all("nodes" not in x for x in cell["elements"]))
+
+
 if __name__ == "__main__":
     unittest.main()

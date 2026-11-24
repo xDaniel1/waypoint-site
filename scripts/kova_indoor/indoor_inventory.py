@@ -6,6 +6,7 @@
     python3 Scripts/indoor_inventory.py --issues   # also list every data problem found
     python3 Scripts/indoor_inventory.py --apple-diff [path]   # summarise IndoorAppleAuditTests' report
     python3 Scripts/indoor_inventory.py --check    # exit 1 on lost coverage (missing cells, outlines)
+                                                   # or a floor button with no named place on it
 
 Reads only `Waypoint/Resources/IndoorVenues`. Venues are the areas `fetch_indoor_venues.py`
 builds (AIRPORTS and MALLS boxes, VENUES points with the radius the app lists them with); a
@@ -28,7 +29,7 @@ POINT_RADIUS = {
     "Roosevelt Field": 320, "Newport Centre": 180, "Jamaica Station": 160, "Atlantic Terminal": 150,
     "Macy's Herald Square": 110, "Columbus Circle": 110,
 }
-KIND = {**{k: "airport" for k in fv.AIRPORTS}, **{k: "mall" for k in fv.MALLS},
+KIND = {**{k: "airport" for k in fv.AIRPORTS}, **{k: "mall" for k in fv.MALLS}, **{k: "station" for k in fv.STATIONS},
         "Grand Central": "station", "Oculus": "mall", "Brookfield Place": "mall", "Fulton Center": "station",
         "Penn Station": "station", "Moynihan Train Hall": "station", "Port Authority": "station",
         "Hudson Yards": "mall", "Staten Island Mall": "mall", "Roosevelt Field": "mall", "Newport Centre": "mall",
@@ -148,7 +149,7 @@ def load_cells():
 def venue_areas():
     """name -> (kind, test(lat, lon) -> bool, [cells])"""
     areas = {}
-    for name, box in {**fv.AIRPORTS, **fv.MALLS}.items():
+    for name, box in {**fv.AIRPORTS, **fv.MALLS, **fv.STATIONS}.items():
         s, w, n, e = box
         areas[name] = (KIND[name], (lambda s=s, w=w, n=n, e=e: lambda la, lo: s <= la <= n and w <= lo <= e)(),
                        fv.cells_in(box), box)
@@ -160,8 +161,18 @@ def venue_areas():
 
 
 def inventory():
+    import indoor_prune
     cells = load_cells()
     areas = venue_areas()
+    # What the floor button lists, as the app works it out (walls count, stairs and lifts only when
+    # nothing else has a floor), with an element in two venues' areas credited to the one that
+    # keeps its floor, and each terminal, station or mall outline the app can pick checked on its
+    # own (indoor_prune.Bundle).
+    bundle = indoor_prune.Bundle(cells, areas)
+    by_outline = collections.defaultdict(list)
+    for area, outline, gone in bundle.problems():
+        if outline:
+            by_outline[area].append((outline, gone))
     used = set()
     report = []
     for name, (kind, inside, area_cells, box) in areas.items():
@@ -180,7 +191,6 @@ def inventory():
         counts = collections.Counter()
         per_level = collections.defaultdict(collections.Counter)
         outlines, issues = [], []
-        listed = set()
         named_places = []
         for el in els:
             k = classify(el)
@@ -196,13 +206,12 @@ def inventory():
                 continue
             for f in fl:
                 per_level[f][k] += 1
-            # IndoorViewModel.floorValues: stairs, lifts and shafts (more than 4 floors) don't list a floor.
-            if k not in ("stairs", "elevator") and len(fl) <= 4:
-                listed.update(fl)
             if k == "gate" and fl:
                 counts["gate_with_floor"] += 1
-                if t.get("level:inferred"):
+                if t.get("level:inferred") == "gates":
                     counts["gate_floor_inferred"] += 1  # indoor_enrich.py, from neighbouring gates
+                elif t.get("level:inferred") == "ways":
+                    counts["gate_floor_ways"] += 1  # fetch_indoor_venues.py, from the ways the gate is on
             if t.get("name:source") == "overture":
                 counts["overture_named"] += 1  # indoor_enrich.py: an OSM unit named from Overture
             if k in ("shop", "food", "amenity", "restroom") and t.get("name"):
@@ -240,7 +249,8 @@ def inventory():
             "name": name, "kind": kind, "cells": len(present), "cells_expected": len(area_cells),
             "missing_cells": missing_cells, "landside_flag": all(cells[rc].get("landside") for rc in present) if present else False,
             "generators": sorted({cells[rc].get("generator", "?").split(" 0")[0] for rc in present}),
-            "outlines": sorted(set(outlines)), "levels": sorted(listed or per_level),
+            "outlines": sorted(set(outlines)), "levels": bundle.listed(name),
+            "unnamed_levels": bundle.unnamed(name), "unnamed_outline_levels": by_outline.get(name, []),
             "all_levels": sorted(per_level),
             "counts": dict(counts), "per_level": {str(k): dict(v) for k, v in sorted(per_level.items())},
             "bare_levels": bare, "stray_levels": stray, "duplicates": dupes, "issues": issues,
@@ -312,7 +322,9 @@ REQUIRED_FLOORS = {"Grand Central": [-2.0]}
 def check():
     """Exit non-zero when the bundle has lost coverage: a listed venue with cells missing or
     without its outline, a cell that isn't valid or wasn't built by the pipeline with the
-    airport (landside) query, or a cell no venue owns. For CI or before committing a refresh."""
+    airport (landside) query, a cell no venue owns, or a floor the venue, or one of its terminal,
+    station or mall outlines, lists with no named place on it. For CI or before committing a
+    refresh."""
     report, orphans = inventory()
     problems = []
     for v in report:
@@ -320,6 +332,12 @@ def check():
             problems.append(f"{v['name']}: cells not bundled {v['missing_cells']}")
         if v["kind"] in ("airport", "station") and not v["outlines"] and (v["name"], "outline") not in KNOWN_GAPS:
             problems.append(f"{v['name']}: no terminal or station outline")
+        # indoor_prune.py: a floor gets a button only when a named place is on it.
+        for f in v["unnamed_levels"]:
+            problems.append(f"{v['name']}: floor {level_label(f)} is listed with no named place (run indoor_prune.py)")
+        for outline, gone in v["unnamed_outline_levels"]:
+            problems.append(f"{v['name']}: {outline} lists {', '.join(level_label(f) for f in gone)} "
+                            "with no named place inside it (run indoor_prune.py)")
         for f in REQUIRED_FLOORS.get(v["name"], []):
             if f not in v["levels"]:
                 problems.append(f"{v['name']}: floor {level_label(f)} is no longer listed")
@@ -351,6 +369,7 @@ def main():
         cells = f"{v['cells']}/{v['cells_expected']}"
         print(f"| {v['name']} | {v['kind']} | {cells} | {len(v['outlines'])} | "
               f"{', '.join(level_label(x) for x in v['levels']) or '—'} | {c.get('gate', 0)} ({c.get('gate_with_floor', 0)}"
+              f"{', ' + str(c['gate_floor_ways']) + ' from ways' if c.get('gate_floor_ways') else ''}"
               f"{', ' + str(c['gate_floor_inferred']) + ' from neighbours' if c.get('gate_floor_inferred') else ''}) | "
               f"{c.get('shop', 0)} | {c.get('food', 0)} | {c.get('restroom', 0)} | {c.get('amenity', 0)} | "
               f"{c.get('room', 0) + c.get('corridor', 0) + c.get('area', 0)} | {c.get('elevator', 0) + c.get('stairs', 0)} | "

@@ -13,6 +13,8 @@ these venues load instantly and offline.
 
 Every area it writes is then run through `indoor_enrich.py`: gates with no floor get the one
 their neighbouring gates agree on, and unnamed shop units get a name from Overture Maps Places.
+Then `indoor_prune.py` runs over every venue: a floor with no named place on it (only stairs,
+lifts or unnamed rooms) is taken off the data, so it gets no floor button.
 
 Airports are fetched with one Overpass request for the whole terminal area, then cut into cells
 locally: one busy-server round trip instead of twenty. Each cell keeps every element whose
@@ -21,7 +23,7 @@ bounds touch the cell widened by MARGIN, the same box the app asks Overpass for.
 Only the tags the app reads are kept and coordinates are rounded to 6 decimals (about 10 cm),
 which roughly halves the bundle against a raw Overpass response.
 """
-import json, math, pathlib, sys, time, urllib.parse, urllib.request
+import collections, json, math, pathlib, sys, time, urllib.error, urllib.parse, urllib.request
 
 CELL, MARGIN = 0.006, 0.002
 OUT = pathlib.Path(__file__).resolve().parent.parent / "Waypoint/Resources/IndoorVenues"
@@ -78,6 +80,38 @@ AIRPORTS = {
     "SEA": (47.436, -122.307, 47.451, -122.294),
     "MSP": (44.870, -93.230, 44.893, -93.193),
     "IAH": (29.982, -95.355, 29.992, -95.329),
+    # The rest of the top US airports whose terminals OpenStreetMap maps inside (probed 2026-11-23:
+    # floored gates, shops or indoor ways). Boxes: every passenger terminal and concourse outline
+    # (not cargo, FBOs or hangars) plus ~280 m for the curbs and garages.
+    "SAN": (32.728, -117.209, 32.737, -117.187),
+    "IAD": (38.94, -77.458, 38.956, -77.437),
+    "LAS": (36.077, -115.158, 36.09, -115.13),
+    "SLC": (40.782, -111.996, 40.793, -111.976),
+    "DCA": (38.844, -77.048, 38.861, -77.038),
+    "HNL": (21.327, -157.929, 21.339, -157.908),
+    "DTW": (42.2, -83.367, 42.232, -83.342),
+    "BWI": (39.174, -76.677, 39.186, -76.659),
+    "SJC": (37.359, -121.935, 37.374, -121.918),
+    "SNA": (33.672, -117.868, 33.685, -117.857),
+    "SMF": (38.689, -121.598, 38.698, -121.583),
+    "PHX": (33.431, -112.015, 33.441, -111.991),
+    "AUS": (30.199, -97.674, 30.205, -97.66),
+    "BNA": (36.123, -86.676, 36.138, -86.663),
+    "PDX": (45.585, -122.603, 45.594, -122.584),
+    "RDU": (35.871, -78.8, 35.882, -78.786),
+    "MCI": (39.294, -94.727, 39.303, -94.715),
+    "CLE": (41.402, -81.846, 41.416, -81.833),
+    # The remaining large and medium US hubs (and three small ones) whose terminals OSM maps
+    # inside, probed 2026-11-24 (branch indoor/more-venues). Boxes: every passenger terminal and
+    # concourse outline and every gate (not cargo, FBOs or hangars), plus ~280 m.
+    "PHL": (39.87, -75.256, 39.885, -75.232), "CLT": (35.215, -80.952, 35.228, -80.936), "MDW": (41.781, -87.749, 41.792, -87.737),
+    "STL": (38.734, -90.372, 38.748, -90.35), "PIT": (40.491, -80.252, 40.501, -80.238), "IND": (39.711, -86.303, 39.721, -86.29),
+    "SJU": (18.433, -66.011, 18.443, -65.998), "CMH": (39.994, -82.891, 40.002, -82.877), "HOU": (29.65, -95.283, 29.658, -95.272),
+    "SDF": (38.18, -85.746, 38.189, -85.735), "ABQ": (35.034, -106.622, 35.052, -106.611), "BOI": (43.565, -116.227, 43.572, -116.215),
+    "TUS": (32.116, -110.943, 32.126, -110.932), "TUL": (36.187, -95.894, 36.195, -95.884), "DAL": (32.841, -96.855, 32.849, -96.845),
+    "BHM": (33.558, -86.758, 33.566, -86.747), "MHT": (42.924, -71.444, 42.931, -71.433), "OAK": (37.706, -122.22, 37.716, -122.207),
+    "SAT": (29.522, -98.477, 29.532, -98.467), "MSY": (29.991, -90.263, 29.999, -90.251), "MKE": (42.943, -87.908, 42.954, -87.895),
+    "CVG": (39.047, -84.662, 39.058, -84.649), "ONT": (34.057, -117.608, 34.064, -117.582), "BDL": (41.927, -72.694, 41.936, -72.678),
 }
 
 # Malls where OpenStreetMap has stores tagged with their floor. A mall with a `shop=mall` outline
@@ -88,12 +122,105 @@ MALLS = {
     "Altamonte Mall": (28.6626, -81.3823, 28.6700, -81.3737), "Aventura Mall": (25.9527, -80.1478, 25.9615, -80.1378),
     # The two largest US malls with their stores mapped on floors in OSM (2026-11-23 audit).
     "Mall of America": (44.8520, -93.2465, 44.8580, -93.2380), "King of Prussia": (40.0850, -75.3975, 40.0910, -75.3865),
+    # More large US malls with 40+ stores mapped on their floors and a `shop=mall` outline (probed
+    # 2026-11-23). Boxes: the outline plus ~150 m.
+    "South Coast Plaza": (33.6862, -117.896, 33.696, -117.8839),
+    "Tysons Corner Center": (38.914, -77.2264, 38.9202, -77.2162),
+    "Del Amo Fashion Center": (33.8262, -118.353, 33.836, -118.3453),
+    "Ala Moana Center": (21.2878, -157.8492, 21.2952, -157.8384),
+    "Fashion Show": (36.1243, -115.1768, 36.1302, -115.1663),
+    "NorthPark Center": (32.8652, -96.7774, 32.8718, -96.7695),
+    "Westfield Valley Fair": (37.3226, -121.9505, 37.328, -121.9403),
+    "Westfield Century City": (34.0552, -118.4229, 34.0624, -118.4151),
+    "Prudential Center": (42.3442, -71.0852, 42.35, -71.0742),
+    "Fashion Centre at Pentagon City": (38.8601, -77.0636, 38.8667, -77.0574),
+    "Somerset Collection": (42.5577, -83.1884, 42.565, -83.1798),
+    "Bellevue Square": (47.6125, -122.2075, 47.6188, -122.1997),
+    # The largest and busiest US malls with their stores mapped on floors in OSM (20+ named stores
+    # with a floor inside a `shop=mall` outline), probed 2026-11-24 (branch indoor/more-venues).
+    # The last seven are regional malls with 90+ such stores in OSM (picked by size, not from any
+    # other map's data).
+    # Boxes: the outline plus ~150 m.
+    "Westfield Southcenter": (47.4562, -122.2633, 47.4616, -122.2536),
+    "Gurnee Mills": (42.3843, -87.9638, 42.3942, -87.9514),
+    "The Shops at Santa Anita": (34.1317, -118.0546, 34.1382, -118.0465),
+    "Easton Town Center": (40.0468, -82.9205, 40.0589, -82.9014),
+    "Westfield Galleria at Roseville": (38.7702, -121.2733, 38.7776, -121.2658),
+    "Fashion Outlets of Chicago": (41.9725, -87.8703, 41.9778, -87.8638),
+    "Twelve Oaks Mall": (42.4888, -83.4745, 42.4953, -83.4648),
+    "The Mall at Green Hills": (36.1049, -86.8208, 36.1093, -86.812),
+    "Chandler Fashion Center": (33.2985, -111.903, 33.3049, -111.8944),
+    "Perimeter Mall": (33.92, -84.3451, 33.9269, -84.3375),
+    "Memorial City Mall": (29.7782, -95.5447, 29.7843, -95.5351),
+    "Mayfair": (43.0604, -88.0477, 43.0673, -88.041),
+    "Jordan Creek Town Center": (41.5671, -93.8085, 41.5721, -93.8007),
+    "Washington Square": (45.447, -122.7838, 45.453, -122.7772),
+    "Galleria Dallas": (32.927, -96.8219, 32.9334, -96.8173),
+    "Montclair Place": (34.0841, -117.6981, 34.0895, -117.6893),
+    "Clackamas Town Center": (45.432, -122.5809, 45.4396, -122.5658),
+    "Rosedale Center": (45.0103, -93.1767, 45.0157, -93.1676),
+    "Eastridge": (37.3216, -121.8178, 37.3287, -121.81),
+    "Springfield Town Center": (38.7719, -77.1776, 38.7772, -77.1713),
+    "The Mall in Columbia": (39.2131, -76.8641, 39.2185, -76.8576),
+    "Short Pump Town Center": (37.6532, -77.6246, 37.659, -77.6142),
+    "City Creek Center": (40.766, -111.8956, 40.7706, -111.8866),
+    "Arden Fair": (38.5985, -121.432, 38.6046, -121.4229),
+    "Ross Park Mall": (40.5393, -80.0113, 40.5469, -80.0037),
+    "Stonestown Galleria": (37.7257, -122.4797, 37.7303, -122.4747),
+    "Hillsdale Shopping Center": (37.5347, -122.3033, 37.5398, -122.2974),
+    "Danbury Fair": (41.3746, -73.4878, 41.3842, -73.4733),
+    "Fashion Island": (33.6114, -117.8801, 33.6205, -117.8709),
+    "Westfield Plaza Bonita": (32.6524, -117.0686, 32.6598, -117.063),
+    "San Francisco Ferry Building": (37.7933, -122.3961, 37.7978, -122.3908),
+    "Westfield Oakridge": (37.2497, -121.8677, 37.2553, -121.858),
+    "Westfield Culver City": (33.9825, -118.3971, 33.9887, -118.3893),
+    "Crabtree Valley Mall": (35.8372, -78.6842, 35.8437, -78.6758),
+    "Willow Grove Park": (40.1374, -75.1275, 40.143, -75.1194),
+    "Scottsdale Fashion Square": (33.4988, -111.9363, 33.5073, -111.9246),
+    "CambridgeSide": (42.3657, -71.0795, 42.3706, -71.073),
+    "Beverly Center": (34.0722, -118.3809, 34.0777, -118.375),
+    "International Market Place": (21.276, -157.8287, 21.2807, -157.8236),
+    "Santa Monica Place": (34.0114, -118.4969, 34.0159, -118.4906),
+    "The Forum Shops at Caesars": (36.1167, -115.1805, 36.1212, -115.1711),
+    "Providence Place": (41.8245, -71.4196, 41.8306, -71.4135),
+    "Walden Galleria": (42.9102, -78.7658, 42.9174, -78.7583),
+    "The Shops at Crystals": (36.1055, -115.1774, 36.11, -115.1716),
+    "CoolSprings Galleria": (35.9536, -86.8175, 35.961, -86.8105),
+    "Flatiron Crossing": (39.9306, -105.1378, 39.9357, -105.1298),
+    "Royal Hawaiian Center": (21.2757, -157.8318, 21.2812, -157.826),
+    "Coronado Center": (35.1045, -106.5775, 35.1098, -106.5682),
+    "Woodland Hills Mall": (36.0596, -95.8879, 36.067, -95.8758),
+    "Park City Center": (40.0637, -76.3439, 40.0706, -76.3341),
+    "The Mall at Fairfield Commons": (39.7639, -84.0602, 39.7707, -84.053),
+    "Boise Towne Square": (43.6057, -116.2825, 43.6117, -116.2737),
+    "Pheasant Lane Mall": (42.6986, -71.4397, 42.704, -71.4342),
+    "Dayton Mall": (39.631, -84.226, 39.637, -84.2151),
+}
+
+# Stations outside New York with their halls mapped inside (rooms, shops and services on floors).
+# Boxes: the station building plus ~150 m.
+STATIONS = {
+    "Denver Union Station": (39.7512, -105.003, 39.7553, -104.9975),
+    "Washington Union Station": (38.8953, -77.0093, 38.8999, -77.003),
+    "Los Angeles Union Station": (34.0538, -118.2386, 34.0584, -118.2331),
+    "Ogilvie Transportation Center": (41.8805, -87.6431, 41.8845, -87.6379),
+    # Added 2026-11-24 (indoor/more-venues): stations whose outline holds shops or services on floors.
+    "Salesforce Transit Center": (37.7863, -122.4004, 37.7919, -122.3933),
+    "Chicago Union Station": (41.877, -87.6416, 41.8804, -87.6368),
+    "South Station": (42.3479, -71.0585, 42.3536, -71.0525),
+    "North Station": (42.3643, -71.0648, 42.3683, -71.0594),
+    "Back Bay Station": (42.3458, -71.0777, 42.349, -71.0729),
 }
 
 # Tags the app reads (IndoorMapParsing); everything else is dropped from the bundle.
 KEEP_TAGS = {
-    "name", "ref", "level", "repeat_on", "indoor", "shop", "amenity", "aeroway", "highway", "building",
+    "name", "ref", "level", "level:ref", "building:levels", "repeat_on", "indoor", "shop", "amenity", "aeroway", "highway", "building",
     "parking", "railway", "public_transport", "station", "type", "operator", "cuisine", "room", "access", "bus", "train",
+    # `level:ref` is the floor as the building's signs number it, and `building:levels` how many
+    # storeys a mall's outline has: indoor_enrich.py's pass 4 reads the venue's floor numbering
+    # and whether a mall mapped on one floor really has one.
+    # Recorded by record_gate_ways (the floors of the ways a gate stands on), for indoor_enrich.py.
+    "level:ways", "level:jet_bridge",
 }
 # Amenities with a floor that are clutter on a floor plan, not places people look for.
 NOISE_AMENITIES = {
@@ -124,12 +251,14 @@ def cell_box(row, col):
 
 
 def query(box, timeout=25):
-    """Keep in step with IndoorMapService.fetchFromOverpass."""
+    """Keep in step with IndoorMapService.fetchFromOverpass (the gate ways' clause is the bundle's own)."""
     b = "{:.6f},{:.6f},{:.6f},{:.6f}".format(*box)
     return (f"[out:json][timeout:{timeout}];("
             f"way[indoor]({b});nwr[level][shop]({b});nwr[level][amenity]({b});"
             f"nwr[repeat_on][shop]({b});nwr[repeat_on][amenity]({b});"
             f"way[highway=steps][level]({b});node[highway=elevator][level]({b});nwr[aeroway=gate]({b});"
+            # Bundle only: the floored ways each gate node stands on (`gate_way_floors`).
+            f"node[aeroway=gate]({b});way(bn)[level];"
             f"way[aeroway=terminal]({b});way[building=train_station]({b});way[building=transportation]({b});"
             f"rel[aeroway=terminal]({b});rel[building=train_station]({b});rel[building=transportation]({b});"
             f"way[shop=mall]({b});rel[shop=mall]({b});"
@@ -262,8 +391,19 @@ def fetch_osm_api(row, col):
     s, w, n, e = cell_box(row, col)
 
     def get(path):
+        # The API answers 429 when a client asks too fast, and 509/503 when it is busy: wait as
+        # long as it says (Retry-After) or back off, rather than write a cell with a part missing.
         req = urllib.request.Request("https://api.openstreetmap.org/api/0.6/" + path, headers={"User-Agent": USER_AGENT})
-        return ET.fromstring(urllib.request.urlopen(req, timeout=120).read())
+        for attempt in range(6):
+            try:
+                return ET.fromstring(urllib.request.urlopen(req, timeout=120).read())
+            except urllib.error.HTTPError as error:
+                if error.code not in (429, 503, 509) or attempt == 5:
+                    raise
+                wait = error.headers.get("Retry-After")
+                pause = min(300, float(wait) if wait and wait.isdigit() else 15 * 2 ** attempt)
+                print(f"  api.openstreetmap.org {error.code}; waiting {pause:.0f}s", file=sys.stderr)
+                time.sleep(pause)
 
     try:
         roots = [get(f"map?bbox={w:.6f},{s:.6f},{e:.6f},{n:.6f}")]
@@ -302,7 +442,8 @@ def fetch_osm_api(row, col):
         t, geo = tags(way), geometry(wid)
         if t and geo and ("way", wid) not in seen:
             seen.add(("way", wid))
-            elements.append({"type": "way", "id": int(wid), "geometry": geo, "tags": t})
+            elements.append({"type": "way", "id": int(wid), "geometry": geo, "tags": t,
+                             "nodes": [int(r) for r in ways[wid][1]]})
     for root in roots:
         for rel in root.findall("relation"):
             if ("relation", rel.get("id")) in seen:
@@ -316,8 +457,56 @@ def fetch_osm_api(row, col):
     return elements
 
 
+# Ways that say which floor a gate node on them is on: an indoor corridor, footway, room or area,
+# or the jet bridge leading off the gate. Walls and building outlines don't.
+def gate_way_kind(tags):
+    if "level" not in tags or tags.get("indoor") == "wall":
+        return None
+    if tags.get("aeroway") == "jet_bridge":
+        return "jet_bridge"
+    if (tags.get("highway") == "corridor" or (tags.get("highway") == "footway" and "indoor" in tags)
+            or tags.get("indoor") in ("corridor", "area", "room", "yes")):
+        return "ways"
+    return None
+
+
+def record_gate_ways(elements):
+    """Tags each gate with no floor with the floors of the ways it is a vertex of.
+
+    A gate node is often a vertex of the indoor corridor or footway it opens onto, or of its jet
+    bridge (MCO, MIA, SEA, SFO and BOS map them this way), and those ways carry a floor. Only the
+    facts are recorded here, as `level:ways` (indoor ways) and `level:jet_bridge`, each a `;` list
+    of single-floor ways' floors; `indoor_enrich.py` decides whether they settle the gate's floor.
+    Done here because the cells keep no way's node list. A way on two floors says nothing.
+    """
+    import indoor_inventory as inv
+    gates = {e["id"]: e for e in elements if e["type"] == "node" and (e.get("tags") or {}).get("aeroway") == "gate"
+             and not inv.floors(e.get("tags") or {})}
+    found = collections.defaultdict(lambda: collections.defaultdict(set))
+    for e in elements:
+        kind = e["type"] == "way" and gate_way_kind(e.get("tags") or {})
+        if not kind:
+            continue
+        f = inv.floors(e["tags"])
+        if len(f) != 1:
+            continue
+        for ref in set(e.get("nodes") or []):
+            if ref in gates:
+                found[ref][kind].add(f[0])
+    for gid, kinds in found.items():
+        tags = dict(gates[gid]["tags"])
+        for kind, fl in kinds.items():
+            tags["level:" + kind] = ";".join(level_text(f) for f in sorted(fl))
+        gates[gid]["tags"] = tags
+
+
+def level_text(value):
+    return str(int(value)) if value == int(value) else str(value)
+
+
 def write(row, col, elements, label):
     box = cell_box(row, col)
+    record_gate_ways(elements)
     kept = [c for c in (compact(e) for e in elements) if c and touches(c, box)]
     kept.sort(key=lambda c: ({"relation": 0, "way": 1, "node": 2}[c["type"]], c["id"]))
     # "landside": the cell answers the airport query too (parking, stations, pick-up), so the app
@@ -339,7 +528,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     refresh, osm_api = "--refresh" in sys.argv, "--osm-api" in sys.argv
     OUT.mkdir(parents=True, exist_ok=True)
-    areas = {**AIRPORTS, **MALLS}
+    areas = {**AIRPORTS, **MALLS, **STATIONS}
     done, touched = set(), set()
     for name, box in areas.items():
         if args and name not in args:
@@ -363,7 +552,7 @@ def main():
                 continue
             write(row, col, cell_elements, name)
             if elements is None:
-                time.sleep(1)
+                time.sleep(2)
         time.sleep(3)
     for name, (lat, lon) in VENUES.items():
         if args and name not in args:
@@ -384,6 +573,10 @@ def main():
     if touched:
         import indoor_enrich
         indoor_enrich.enrich(touched, overture="--no-overture" not in sys.argv)
+        # After enriching (an Overture name can make a floor named), over every venue: a rebuilt
+        # cell can hold another venue's elements.
+        import indoor_prune
+        indoor_prune.prune()
 
 
 if __name__ == "__main__":
