@@ -216,11 +216,11 @@ STATIONS = {
 # probed 2026-11-24 (indoor/more-mapping). Boxes: the `leisure=stadium` outline plus ~70 m.
 # Kind `other` (KnownVenue). Left out: Madison Square Garden, Barclays Center and TD Garden,
 # built over Penn Station, Atlantic Terminal and North Station (their circles would take the
-# stations' halls), and stadiums whose bundle keeps no named place on a floor (Allegiant,
+# stations' halls), and open-air stadiums (Fenway Park: its outline has no `building`, see
+# `is_hall`), and stadiums whose bundle keeps no named place on a floor (Allegiant,
 # Lumen Field, U.S. Bank Stadium, Ball Arena, Climate Pledge Arena, SoFi, AT&T, MetLife).
 HALLS = {
     "Capital One Arena": (38.8969, -77.0226, 38.8993, -77.0193),
-    "Fenway Park": (42.3449, -71.0996, 42.3478, -71.0947),
 }
 
 # Tags the app reads (IndoorMapParsing); everything else is dropped from the bundle.
@@ -281,10 +281,12 @@ def query(box, timeout=25):
 
 
 def is_hall(tags):
-    """A stadium, arena or convention centre outline: a venue the app treats like a mall
-    (IndoorMapParsing.isHall), its concourses' stands and eateries its tenants."""
-    return (tags.get("leisure") == "stadium" or tags.get("building") == "stadium"
-            or tags.get("amenity") in ("conference_centre", "exhibition_centre"))
+    """A roofed stadium, arena or convention centre outline: a venue the app treats like a mall
+    (IndoorMapParsing.isHall), its concourses' stands and eateries its tenants. A `leisure=stadium`
+    with no `building` (a school's open-air field, Fenway Park) is not one."""
+    return (tags.get("building") == "stadium"
+            or ("building" in tags and (tags.get("leisure") == "stadium"
+                                        or tags.get("amenity") in ("conference_centre", "exhibition_centre"))))
 
 
 def landside(tags):

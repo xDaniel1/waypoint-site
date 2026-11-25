@@ -182,24 +182,21 @@ def gate_floors(elements):
                 from_ways.append((g, f[0]))
     voters = own + from_ways
     outlines = [e["geometry"] for e in elements if e["type"] == "way" and e.get("geometry")
-                and (e["tags"].get("aeroway") == "terminal" or e["tags"].get("building") == "terminal")]
+                and e["tags"].get("aeroway") == "terminal"]
 
     def loose(g):
         near = [f for h, f in own if h is not g and metres((g["lat"], g["lon"]), (h["lat"], h["lon"])) <= LOOSE_REACH]
         return near[0] if len(near) >= LOOSE_NEIGHBOURS and len(set(near)) == 1 else None
 
     def outline(g):
-        found = None
+        # Every OSM-floored gate in every outline over this gate must agree, small ones too.
+        seen, enough = set(), False
         for ring in outlines:
-            if not inside((g["lat"], g["lon"]), ring):
-                continue
-            fs = {f for h, f in own if h is not g and inside((h["lat"], h["lon"]), ring)}
-            n = sum(1 for h, f in own if h is not g and inside((h["lat"], h["lon"]), ring))
-            if len(fs) > 1 or (found is not None and fs and fs != {found}):
-                return None
-            if n >= OUTLINE_GATES:
-                found = next(iter(fs))
-        return found
+            if inside((g["lat"], g["lon"]), ring):
+                fs = [f for h, f in own if h is not g and inside((h["lat"], h["lon"]), ring)]
+                seen.update(fs)
+                enough = enough or len(fs) >= OUTLINE_GATES
+        return next(iter(seen)) if enough and len(seen) == 1 else None
 
     added, suspect, kind = {}, [], {}
     for g, f in known:

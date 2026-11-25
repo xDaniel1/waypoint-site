@@ -45,6 +45,9 @@ class GateFloors(unittest.TestCase):
         hall = square(9, 39.999, -73.001, size=0.012, aeroway="terminal")
         added, _, _, kind = en.gate_floors(gates + [hall])
         self.assertEqual((added, kind), ({4: 2.0}, {4: "outline"}))
+        # A smaller outline over the gate whose gate disagrees says nothing either.
+        pier = square(8, 39.9995, -72.9915, size=0.002, aeroway="terminal")
+        self.assertEqual(en.gate_floors(gates + [hall, pier, gate(5, 40.0, -72.9900, "1")])[0], {})
         gates[1]["tags"]["level"] = "1"  # a split outline says nothing
         self.assertEqual(en.gate_floors(gates + [hall])[0], {})
 
@@ -454,3 +457,13 @@ class EnrichRuns(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Halls(unittest.TestCase):
+    def test_only_roofed_stadiums_and_convention_centres_are_venue_outlines(self):
+        import fetch_indoor_venues as fv
+        self.assertTrue(fv.is_hall({"leisure": "stadium", "building": "yes"}))
+        self.assertTrue(fv.is_hall({"building": "stadium"}))
+        self.assertTrue(fv.is_hall({"amenity": "conference_centre", "building": "yes"}))
+        self.assertFalse(fv.is_hall({"leisure": "stadium"}))
+        self.assertFalse(fv.is_hall({"amenity": "conference_centre"}))
