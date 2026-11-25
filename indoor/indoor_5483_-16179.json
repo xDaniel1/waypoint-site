@@ -1,1 +1,1 @@
-{"elements":[]}
+{"landside":true,"generator":"waypoint-site scripts/build_indoor_plans.py","elements":[{"type":"way","id":1415962202,"tags":{"amenity":"parking","building":"yes","parking":"multi-storey"},"geometry":[{"lat":32.901564,"lon":-97.066877},{"lat":32.901561,"lon":-97.065513},{"lat":32.900963,"lon":-97.065513},{"lat":32.900973,"lon":-97.066877},{"lat":32.901564,"lon":-97.066877}]}],"osm_base":"2026-11-25T21:11:36Z"}
