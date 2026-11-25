@@ -181,8 +181,8 @@ def gate_floors(elements):
             else:
                 from_ways.append((g, f[0]))
     voters = own + from_ways
-    outlines = [e["geometry"] for e in elements if e["type"] == "way" and e.get("geometry")
-                and e["tags"].get("aeroway") == "terminal"]
+    outlines = [e["geometry"] for e in elements if e["type"] == "way" and len(e.get("geometry") or []) >= 4
+                and e["geometry"][0] == e["geometry"][-1] and e["tags"].get("aeroway") == "terminal"]
 
     def loose(g):
         near = [f for h, f in own if h is not g and metres((g["lat"], g["lon"]), (h["lat"], h["lon"])) <= LOOSE_REACH]

@@ -455,10 +455,6 @@ class EnrichRuns(unittest.TestCase):
         self.assertEqual(self.run_enrich(["B"]), full, "a subset run from scratch writes what a full run does")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Halls(unittest.TestCase):
     def test_only_roofed_stadiums_and_convention_centres_are_venue_outlines(self):
         import fetch_indoor_venues as fv
@@ -467,3 +463,7 @@ class Halls(unittest.TestCase):
         self.assertTrue(fv.is_hall({"amenity": "conference_centre", "building": "yes"}))
         self.assertFalse(fv.is_hall({"leisure": "stadium"}))
         self.assertFalse(fv.is_hall({"amenity": "conference_centre"}))
+
+
+if __name__ == "__main__":
+    unittest.main()
