@@ -212,10 +212,21 @@ STATIONS = {
     "Back Bay Station": (42.3458, -71.0777, 42.349, -71.0729),
 }
 
+# Stadiums and arenas whose concourses OSM maps inside (named stands and eateries on floors),
+# probed 2026-11-24 (indoor/more-mapping). Boxes: the `leisure=stadium` outline plus ~70 m.
+# Kind `other` (KnownVenue). Left out: Madison Square Garden, Barclays Center and TD Garden,
+# built over Penn Station, Atlantic Terminal and North Station (their circles would take the
+# stations' halls), and stadiums whose bundle keeps no named place on a floor (Allegiant,
+# Lumen Field, U.S. Bank Stadium, Ball Arena, Climate Pledge Arena, SoFi, AT&T, MetLife).
+HALLS = {
+    "Capital One Arena": (38.8969, -77.0226, 38.8993, -77.0193),
+    "Fenway Park": (42.3449, -71.0996, 42.3478, -71.0947),
+}
+
 # Tags the app reads (IndoorMapParsing); everything else is dropped from the bundle.
 KEEP_TAGS = {
     "name", "ref", "level", "level:ref", "building:levels", "repeat_on", "indoor", "shop", "amenity", "aeroway", "highway", "building",
-    "parking", "railway", "public_transport", "station", "type", "operator", "cuisine", "room", "access", "bus", "train",
+    "parking", "railway", "public_transport", "station", "type", "leisure", "operator", "cuisine", "room", "access", "bus", "train",
     # `level:ref` is the floor as the building's signs number it, and `building:levels` how many
     # storeys a mall's outline has: indoor_enrich.py's pass 4 reads the venue's floor numbering
     # and whether a mall mapped on one floor really has one.
@@ -262,9 +273,18 @@ def query(box, timeout=25):
             f"way[aeroway=terminal]({b});way[building=train_station]({b});way[building=transportation]({b});"
             f"rel[aeroway=terminal]({b});rel[building=train_station]({b});rel[building=transportation]({b});"
             f"way[shop=mall]({b});rel[shop=mall]({b});"
+            f"way[leisure=stadium]({b});way[building=stadium]({b});rel[leisure=stadium]({b});"
+            f"way[amenity~\"^(conference_centre|exhibition_centre)$\"]({b});"
             f"nwr[amenity~\"^(parking|car_rental|taxi|bus_station)$\"]({b});nwr[aeroway=passenger_pickup]({b});"
             f"nwr[railway=station]({b});nwr[public_transport=station]({b});"
             f");out body geom;")
+
+
+def is_hall(tags):
+    """A stadium, arena or convention centre outline: a venue the app treats like a mall
+    (IndoorMapParsing.isHall), its concourses' stands and eateries its tenants."""
+    return (tags.get("leisure") == "stadium" or tags.get("building") == "stadium"
+            or tags.get("amenity") in ("conference_centre", "exhibition_centre"))
 
 
 def landside(tags):
@@ -281,7 +301,7 @@ def wanted(kind, tags):
     """
     floored = "level" in tags or "repeat_on" in tags
     place = (tags.get("aeroway") == "terminal" or tags.get("building") in ("train_station", "transportation")
-             or tags.get("shop") == "mall")
+             or tags.get("shop") == "mall" or is_hall(tags))
     if place and kind != "node" and "indoor" not in tags:
         return True
     if tags.get("aeroway") == "gate":
@@ -528,7 +548,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     refresh, osm_api = "--refresh" in sys.argv, "--osm-api" in sys.argv
     OUT.mkdir(parents=True, exist_ok=True)
-    areas = {**AIRPORTS, **MALLS, **STATIONS}
+    areas = {**AIRPORTS, **MALLS, **STATIONS, **HALLS}
     done, touched = set(), set()
     for name, box in areas.items():
         if args and name not in args:

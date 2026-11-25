@@ -24,17 +24,33 @@ class GateFloors(unittest.TestCase):
         return [gate(i, 40.0, -73.0 + i * 0.00035, lv) for i, lv in enumerate(levels, 1)]
 
     def test_unfloored_gate_takes_its_neighbours_floor(self):
-        added, suspect, _ = en.gate_floors(self.concourse(["1", "1", None, "1", "1"]))
+        added, suspect, *_ = en.gate_floors(self.concourse(["1", "1", None, "1", "1"]))
         self.assertEqual(added, {3: 1.0})
         self.assertEqual(suspect, [])
 
     def test_too_few_or_split_neighbours_say_nothing(self):
-        self.assertEqual(en.gate_floors(self.concourse(["1", None, "1"]))[0], {})
+        self.assertEqual(en.gate_floors(self.concourse(["1", None]))[0], {})
         self.assertEqual(en.gate_floors(self.concourse(["1", "1", None, "2", "2"]))[0], {})
+        # Two agreeing gates are enough within 200 m, not farther.
+        far = [gate(1, 40.0, -73.0, "1"), gate(2, 40.0, -73.0025, "1"), gate(3, 40.0, -72.9975)]
+        self.assertEqual(en.gate_floors(far)[0], {})
+
+    def test_two_gates_within_200_m_floor_a_gate(self):
+        added, _, _, kind = en.gate_floors(self.concourse(["1", None, "1"]))
+        self.assertEqual((added, kind), ({2: 1.0}, {2: "gates"}))
+
+    def test_a_terminal_outline_whose_gates_share_a_floor_floors_its_gates(self):
+        gates = [gate(1, 40.0, -73.0, "2"), gate(2, 40.0, -72.997, "2"), gate(3, 40.0, -72.994, "2"),
+                 gate(4, 40.0, -72.9905)]
+        hall = square(9, 39.999, -73.001, size=0.012, aeroway="terminal")
+        added, _, _, kind = en.gate_floors(gates + [hall])
+        self.assertEqual((added, kind), ({4: 2.0}, {4: "outline"}))
+        gates[1]["tags"]["level"] = "1"  # a split outline says nothing
+        self.assertEqual(en.gate_floors(gates + [hall])[0], {})
 
     def test_a_gate_every_neighbour_disagrees_with_is_reported_not_changed(self):
         gates = self.concourse(["1", "1", "0", "1", "1"])
-        added, suspect, _ = en.gate_floors(gates)
+        added, suspect, *_ = en.gate_floors(gates)
         self.assertEqual(added, {})
         self.assertEqual([s[0] for s in suspect], [3])
         self.assertEqual(gates[2]["tags"]["level"], "0")

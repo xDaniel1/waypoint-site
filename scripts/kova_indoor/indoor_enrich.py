@@ -66,6 +66,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import fetch_indoor_venues as fv  # noqa: E402
 
 GATE_REACH, GATE_NEIGHBOURS = 120.0, 3
+# Pass 2's fallbacks, from OSM's own gate levels only (docs/indoor-audit.md, section 12):
+# a pair of gates within LOOSE_REACH, every OSM-floored gate there on one floor (1,646 of 1,652
+# right leave-one-out), or a terminal outline whose OSM-floored gates (at least OUTLINE_GATES)
+# are all on one floor (740 of 743).
+LOOSE_REACH, LOOSE_NEIGHBOURS, OUTLINE_GATES = 200.0, 2, 3
 TWIN_REACH = 40.0
 # Overture removes old releases from S3 after a few months: set OVERTURE_RELEASE to a current one
 # (https://docs.overturemaps.org/release/latest/) when the pinned one is gone.
@@ -126,7 +131,7 @@ def level_text(value):
 def strip_gate_floors(elements):
     for e in elements:
         t = e["tags"]
-        if t.get("aeroway") == "gate" and t.get("level:inferred") in ("gates", "ways"):
+        if t.get("aeroway") == "gate" and t.get("level:inferred") in ("gates", "ways", "outline"):
             for k in ADDED_GATE_TAGS:
                 t.pop(k, None)
 
@@ -152,11 +157,12 @@ def way_floors(elements):
 
 
 def gate_floors(elements):
-    """Pass 2 over gate nodes. Returns (added, suspect, overruled):
+    """Pass 2 over gate nodes. Returns (added, suspect, overruled, kind):
     - added: {gate id: floor} for unfloored gates their neighbours agree on;
     - suspect: OSM-floored gates every neighbour disagrees with [(id, label, floor, neighbours')];
     - overruled: ids of gates pass 1 floored from their ways that a unanimous vote of OSM's own
-      levels contradicts (ORD's L and M gates): the way-floor is taken back.
+      levels contradicts (ORD's L and M gates): the way-floor is taken back;
+    - kind: {gate id: "gates" | "outline"}, the rule that floored each added gate.
     OSM's own levels vote, and so do pass 1's floors that stand."""
     gates = [e for e in elements if e["type"] == "node" and e["tags"].get("aeroway") == "gate"]
     known = [(g, floors(g["tags"])) for g in gates]
@@ -175,17 +181,42 @@ def gate_floors(elements):
             else:
                 from_ways.append((g, f[0]))
     voters = own + from_ways
-    added, suspect = {}, []
+    outlines = [e["geometry"] for e in elements if e["type"] == "way" and e.get("geometry")
+                and (e["tags"].get("aeroway") == "terminal" or e["tags"].get("building") == "terminal")]
+
+    def loose(g):
+        near = [f for h, f in own if h is not g and metres((g["lat"], g["lon"]), (h["lat"], h["lon"])) <= LOOSE_REACH]
+        return near[0] if len(near) >= LOOSE_NEIGHBOURS and len(set(near)) == 1 else None
+
+    def outline(g):
+        found = None
+        for ring in outlines:
+            if not inside((g["lat"], g["lon"]), ring):
+                continue
+            fs = {f for h, f in own if h is not g and inside((h["lat"], h["lon"]), ring)}
+            n = sum(1 for h, f in own if h is not g and inside((h["lat"], h["lon"]), ring))
+            if len(fs) > 1 or (found is not None and fs and fs != {found}):
+                return None
+            if n >= OUTLINE_GATES:
+                found = next(iter(fs))
+        return found
+
+    added, suspect, kind = {}, [], {}
     for g, f in known:
         if g["id"] in overruled or not f:
-            v = vote(g, voters)
+            v, k = vote(g, voters), "gates"
+            if v is None:
+                v = loose(g)
+            if v is None:
+                v, k = outline(g), "outline"
             if v is not None:
                 added[g["id"]] = v
+                kind[g["id"]] = k
         elif not g["tags"].get("level:inferred"):
             v = vote(g, own)
             if v is not None and v not in f:
                 suspect.append((g["id"], g["tags"].get("ref") or g["tags"].get("name"), f, v))
-    return added, suspect, overruled
+    return added, suspect, overruled, kind
 
 
 # --- 2. Overture names ---------------------------------------------------------------------
@@ -384,7 +415,7 @@ def store_points(elements, places, venue, within=lambda lat, lon: True, skip=(),
     # "3rd floor").
     outlines = [e["geometry"] for e in elements if e["type"] == "way" and "indoor" not in e["tags"]
                 and len(e.get("geometry") or []) >= 4 and e["geometry"][0] == e["geometry"][-1]
-                and (e["tags"].get("shop") == "mall" or e["tags"].get("aeroway") == "terminal"
+                and (e["tags"].get("shop") == "mall" or fv.is_hall(e["tags"]) or e["tags"].get("aeroway") == "terminal"
                      or e["tags"].get("building") in ("train_station", "transportation"))]
     spots = [e for e in elements if e["type"] == "node" and ("shop" in e["tags"] or "amenity" in e["tags"])
              and not e["tags"].get("level:source") and floors(e["tags"])]
@@ -604,7 +635,7 @@ def enrich_cells(data, venue, is_airport, places, within=lambda lat, lon: True, 
         for e in copies[("node", gid)]:
             e["tags"]["level"] = level_text(level)
             e["tags"]["level:inferred"] = "ways"
-    gates, suspect, overruled = gate_floors(unique) if is_airport else ({}, [], set())
+    gates, suspect, overruled, kinds = gate_floors(unique) if is_airport else ({}, [], set(), {})
     for gid in overruled:
         by_ways.pop(gid, None)
         for e in copies[("node", gid)]:
@@ -613,7 +644,7 @@ def enrich_cells(data, venue, is_airport, places, within=lambda lat, lon: True, 
     for gid, level in gates.items():
         for e in copies[("node", gid)]:
             e["tags"]["level"] = level_text(level)
-            e["tags"]["level:inferred"] = "gates"
+            e["tags"]["level:inferred"] = kinds.get(gid, "gates")
     names, points = {}, []
     if places is not None:
         if standalone:

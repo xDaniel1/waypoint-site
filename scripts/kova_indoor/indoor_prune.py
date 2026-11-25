@@ -142,7 +142,7 @@ class Outline:
 
     def __init__(self, el, ring):
         t = el.get("tags", {})
-        self.key, self.ring, self.is_mall = (el["type"], el["id"]), ring, t.get("shop") == "mall"
+        self.key, self.ring, self.is_mall = (el["type"], el["id"]), ring, (t.get("shop") == "mall" or fv.is_hall(t))
         self.name = t.get("name") or f"{el['type']} {el['id']}"
         lats, lons = [p[0] for p in ring], [p[1] for p in ring]
         self.bbox = (min(lats), min(lons), max(lats), max(lons))

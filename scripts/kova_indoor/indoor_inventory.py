@@ -30,6 +30,7 @@ POINT_RADIUS = {
     "Macy's Herald Square": 110, "Columbus Circle": 110,
 }
 KIND = {**{k: "airport" for k in fv.AIRPORTS}, **{k: "mall" for k in fv.MALLS}, **{k: "station" for k in fv.STATIONS},
+        **{k: "other" for k in fv.HALLS},
         "Grand Central": "station", "Oculus": "mall", "Brookfield Place": "mall", "Fulton Center": "station",
         "Penn Station": "station", "Moynihan Train Hall": "station", "Port Authority": "station",
         "Hudson Yards": "mall", "Staten Island Mall": "mall", "Roosevelt Field": "mall", "Newport Centre": "mall",
@@ -102,7 +103,7 @@ def classify(el):
     t = el.get("tags", {})
     if el["type"] != "node" and closed(el) and "indoor" not in t and (
             t.get("aeroway") == "terminal" or t.get("building") in ("train_station", "transportation")
-            or t.get("shop") == "mall"):
+            or t.get("shop") == "mall" or fv.is_hall(t)):
         return "footprint"
     if t.get("access") in ("private", "no", "permit") and ("shop" in t or "amenity" in t) and not fv.landside(t) \
             and "indoor" not in t:
@@ -149,7 +150,7 @@ def load_cells():
 def venue_areas():
     """name -> (kind, test(lat, lon) -> bool, [cells])"""
     areas = {}
-    for name, box in {**fv.AIRPORTS, **fv.MALLS, **fv.STATIONS}.items():
+    for name, box in {**fv.AIRPORTS, **fv.MALLS, **fv.STATIONS, **fv.HALLS}.items():
         s, w, n, e = box
         areas[name] = (KIND[name], (lambda s=s, w=w, n=n, e=e: lambda la, lo: s <= la <= n and w <= lo <= e)(),
                        fv.cells_in(box), box)
@@ -208,8 +209,8 @@ def inventory():
                 per_level[f][k] += 1
             if k == "gate" and fl:
                 counts["gate_with_floor"] += 1
-                if t.get("level:inferred") == "gates":
-                    counts["gate_floor_inferred"] += 1  # indoor_enrich.py, from neighbouring gates
+                if t.get("level:inferred") in ("gates", "outline"):
+                    counts["gate_floor_inferred"] += 1  # indoor_enrich.py, from neighbouring gates or the terminal outline
                 elif t.get("level:inferred") == "ways":
                     counts["gate_floor_ways"] += 1  # fetch_indoor_venues.py, from the ways the gate is on
             if t.get("name:source") == "overture":
