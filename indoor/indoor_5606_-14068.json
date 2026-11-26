@@ -1,1 +1,1 @@
-{"elements":[]}
+{"landside":true,"generator":"waypoint-site scripts/build_indoor_plans.py","elements":[{"type":"way","id":408476606,"tags":{"access":"customers","amenity":"parking","building":"parking","name":"International Terminal Park-Ride","operator":"Hartsfield-Jackson Atlanta International Airport","parking":"multi-storey"},"geometry":[{"lat":33.643328,"lon":-84.405396},{"lat":33.643327,"lon":-84.40459},{"lat":33.641342,"lon":-84.404588},{"lat":33.64134,"lon":-84.405393},{"lat":33.643328,"lon":-84.405396}]}],"osm_base":"2026-11-26T19:55:03Z"}

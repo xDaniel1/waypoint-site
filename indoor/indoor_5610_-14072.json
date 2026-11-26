@@ -1,1 +1,1 @@
-{"elements":[]}
+{"landside":true,"generator":"waypoint-site scripts/build_indoor_plans.py","elements":[{"type":"node","id":12272794759,"tags":{"amenity":"car_rental","name":"Budget Rent A Car"},"lat":33.661908,"lon":-84.430349}],"osm_base":"2026-11-26T20:34:35Z"}
