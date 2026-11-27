@@ -1,0 +1,1 @@
+{"landside":true,"generator":"waypoint-site scripts/build_indoor_plans.py","elements":[{"type":"node","id":1483930604,"tags":{"aeroway":"gate","ref":"Cutter Aviation"},"lat":35.038601,"lon":-106.61926},{"type":"node","id":1483931720,"tags":{"aeroway":"gate","ref":"Atlantic Aviation"},"lat":35.0363,"lon":-106.618949}],"osm_base":"2026-11-27T19:56:06Z"}
