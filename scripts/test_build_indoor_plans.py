@@ -131,6 +131,14 @@ class Scheduling(unittest.TestCase):
         # a new venue whose first try just failed is not "a week" stuck
         self.assertEqual(b.stuck_cells({"fetched": {}, "tried": {"5_5": 10 * DAY}, "first_tried": {"5_5": 10 * DAY}}, None, week), [])
 
+    def test_lagging_manual_refresh_is_not_stuck(self):
+        week = 7 * DAY
+        # refreshed for real on day 9, then a manual run on day 10 kept a lagging answer, clearing "fetched"
+        index = {"fetched": {}, "tried": {"1_2": 10 * DAY}, "first_tried": {"1_2": 1 * DAY}, "refreshed": {"1_2": 9 * DAY}}
+        self.assertEqual(b.stuck_cells(index, [(1, 2)], week), [])
+        index["tried"]["1_2"] = 17 * DAY  # a week of tries since that refresh
+        self.assertEqual(b.stuck_cells(index, [(1, 2)], week), ["1_2"])
+
     def test_many_failures_turn_the_run_red(self):
         self.assertEqual(b.outcome(written=500, failed=3), 0)
         self.assertEqual(b.outcome(written=500, failed=40), 0)
@@ -260,6 +268,21 @@ class Files(unittest.TestCase):
         finally:
             b.urllib.request.urlopen = real
 
+    def test_a_lagging_answer_on_a_fresh_cell_leaves_it_due(self):
+        # A --refresh run reaches a cell fetched 3 days ago and only a lagging server answers.
+        d = pathlib.Path(tempfile.mkdtemp())
+        old_out, old_index, old_fetch = b.OUT, b.INDEX, b.fetch
+        try:
+            b.OUT, b.INDEX = d, d / "_data" / "i.json"
+            b.fetch = lambda row, col, not_before=None: json.dumps({"osm3s": {"timestamp_osm_base": "2026-01-01T00:00:00Z"}, "elements": []}).encode()
+            index = b.load_index()
+            index["fetched"]["1_2"] = int(time.time()) - 3 * DAY
+            b.run({(1, 2): ["X"]}, index, time.time())
+            self.assertNotIn("1_2", index["fetched"])
+            self.assertFalse(b.is_fresh(d / "indoor_1_2.json", index["fetched"].get("1_2"), time.time()))
+        finally:
+            b.OUT, b.INDEX, b.fetch = old_out, old_index, old_fetch
+
     def test_only_a_current_answer_restarts_the_clock(self):
         d = pathlib.Path(tempfile.mkdtemp())
         old_out, old_index, old_fetch = b.OUT, b.INDEX, b.fetch
@@ -311,11 +334,11 @@ class Files(unittest.TestCase):
         old = b.INDEX
         try:
             b.INDEX = d / "_data" / "indoor_fetched.json"
-            self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}, "first_tried": {}, "osm": {}})
+            self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}, "first_tried": {}, "refreshed": {}, "osm": {}})
             b.save_index({"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
-            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "first_tried": {}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
+            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "first_tried": {}, "refreshed": {"1_2": 5}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
             b.INDEX.write_text('{"fetched": {"a": "x", "b": 1, "c": NaN, "d": Infinity}, "tried": []}')
-            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "first_tried": {}, "osm": {}})
+            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "first_tried": {}, "refreshed": {"b": 1}, "osm": {}})
         finally:
             b.INDEX = old
 

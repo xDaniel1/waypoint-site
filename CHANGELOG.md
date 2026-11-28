@@ -7,6 +7,14 @@ permalink: /changelog
 
 Kova Maps uses one version number across iPhone, Android and the web.
 
+## Site 1.1.2 — November 2026
+
+**Indoor plans**
+- A cell that a manual refresh could only get from a lagging OpenStreetMap server is asked for again the next night, even if it was refreshed recently.
+- That doesn't set off a false "not refreshed in a week" warning: the last real refresh is kept separately (`refreshed` in `_data/indoor_fetched.json`) and the warning counts from it. An older index seeds it from its fetch times.
+- Runs on main keep the `indoor-plans` queue name, so a nightly run already going when this ships still blocks a manual one.
+- A manual test run from another branch runs in its own queue, so it can't delay the nightly refresh.
+
 ## Site 1.1.1 — November 2026
 
 **Indoor plans** (kovamaps.com/indoor)
