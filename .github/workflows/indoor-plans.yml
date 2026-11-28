@@ -18,7 +18,9 @@ permissions:
 
 concurrency:
   # One queue per branch: a manual test run from another branch can't hold up the nightly refresh.
-  group: indoor-plans-${{ github.ref }}
+  # Main keeps the old group name, so a run already queued under it when this ships is still
+  # waited for and two publishers never push the same cells at once.
+  group: ${{ github.ref == 'refs/heads/main' && 'indoor-plans' || format('indoor-plans-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:
