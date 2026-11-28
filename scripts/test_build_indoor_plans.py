@@ -330,9 +330,9 @@ class Files(unittest.TestCase):
             b.INDEX = d / "_data" / "indoor_fetched.json"
             self.assertEqual(b.load_index(), {"fetched": {}, "tried": {}, "first_tried": {}, "refreshed": {}, "osm": {}})
             b.save_index({"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
-            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "first_tried": {}, "refreshed": {}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
+            self.assertEqual(b.load_index(), {"fetched": {"1_2": 5}, "tried": {"1_2": 6}, "first_tried": {}, "refreshed": {"1_2": 5}, "osm": {"1_2": "2026-11-22T07:20:03Z"}})
             b.INDEX.write_text('{"fetched": {"a": "x", "b": 1, "c": NaN, "d": Infinity}, "tried": []}')
-            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "first_tried": {}, "refreshed": {}, "osm": {}})
+            self.assertEqual(b.load_index(), {"fetched": {"b": 1}, "tried": {}, "first_tried": {}, "refreshed": {"b": 1}, "osm": {}})
         finally:
             b.INDEX = old
 

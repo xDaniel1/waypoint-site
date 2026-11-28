@@ -142,7 +142,11 @@ def load_index():
         return {k: v for k, v in part.items() if is_time(v)} if isinstance(part, dict) else {}
     osm = raw.get("osm")
     osm = {k: v for k, v in osm.items() if is_snapshot(v)} if isinstance(osm, dict) else {}
-    return {"fetched": times("fetched"), "tried": times("tried"), "first_tried": times("first_tried"), "refreshed": times("refreshed"), "osm": osm}
+    fetched = times("fetched")
+    # An index from before "refreshed" existed: its fetch times are the last real refreshes, so a
+    # first lagging --refresh (which clears "fetched") doesn't make a recent cell look stuck.
+    refreshed = {**fetched, **times("refreshed")}
+    return {"fetched": fetched, "tried": times("tried"), "first_tried": times("first_tried"), "refreshed": refreshed, "osm": osm}
 
 def parse_snapshot(v):
     """The time of an Overpass timestamp_osm_base such as 2026-11-22T07:20:03Z, or None."""
