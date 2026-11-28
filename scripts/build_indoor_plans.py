@@ -142,7 +142,7 @@ def load_index():
         return {k: v for k, v in part.items() if is_time(v)} if isinstance(part, dict) else {}
     osm = raw.get("osm")
     osm = {k: v for k, v in osm.items() if is_snapshot(v)} if isinstance(osm, dict) else {}
-    return {"fetched": times("fetched"), "tried": times("tried"), "first_tried": times("first_tried"), "osm": osm}
+    return {"fetched": times("fetched"), "tried": times("tried"), "first_tried": times("first_tried"), "refreshed": times("refreshed"), "osm": osm}
 
 def parse_snapshot(v):
     """The time of an Overpass timestamp_osm_base such as 2026-11-22T07:20:03Z, or None."""
@@ -177,7 +177,7 @@ def is_time(v):
 
 def save_index(index):
     INDEX.parent.mkdir(exist_ok=True)
-    body = {name: dict(sorted(index.get(name, {}).items())) for name in ("fetched", "tried", "first_tried", "osm")}
+    body = {name: dict(sorted(index.get(name, {}).items())) for name in ("fetched", "tried", "first_tried", "refreshed", "osm")}
     write_atomic(INDEX, (json.dumps(body, indent=0) + "\n").encode())
 
 def write_atomic(path, body):
@@ -200,12 +200,20 @@ def order(cells, index):
     return sorted(cells, key=lambda cell: (last(cell), cell))
 
 def stuck_cells(index, wanted=None, week=7 * 86400):
-    """Cells still wanted that were tried more than a week after their last successful fetch."""
+    """Cells still wanted that were tried more than a week after their last successful fetch.
+
+    The last real refresh is kept apart in "refreshed": "fetched" is cleared when a lagging answer
+    is kept (so the cell is due again), and a manual run that gets one must not make a cell that
+    refreshed yesterday look a week stuck."""
     keep = None if wanted is None else {f"{r}_{c}" for r, c in wanted}
     # A cell never fetched counts from its first try, not from 1970.
     first = index.get("first_tried", {})
+    refreshed = index.get("refreshed", {})
+    def since(k, t):
+        known = [v for v in (refreshed.get(k), index["fetched"].get(k)) if v is not None]
+        return max(known) if known else first.get(k, t)
     return sorted(k for k, t in index["tried"].items()
-                  if (keep is None or k in keep) and t - index["fetched"].get(k, first.get(k, t)) > week)
+                  if (keep is None or k in keep) and t - since(k, t) > week)
 
 def outcome(written, failed):
     """Exit status: red when failures match or outnumber successes, or more than a few cells failed,
@@ -388,6 +396,7 @@ def run(wanted, index, now):
         age = snapshot_age(base)
         if age is not None and age <= CURRENT:
             index["fetched"][key] = int(time.time())
+            index.setdefault("refreshed", {})[key] = index["fetched"][key]
         else:
             # Data from a lagging server is better than none, but doesn't count as a refresh: the
             # cell stays due and is asked for again next run, when a current server may answer.
